@@ -15,7 +15,6 @@ Then use:
 ```go
 import (
     "github.com/ivahaev/amigo"
-    "github.com/ivahaev/go-logger"
 )
 
 
@@ -30,14 +29,14 @@ func main() {
     go func() {
         for {
             var e = <-c
-            logger.Debug(e)
+            // Processing event
         }
     }()
     
     // Check if connected with Asterisk, will send Action "QueueSummary"
     if amigo.Connected() {
         result, err := amigo.Action(map[string]string{"Action": "QueueSummary", "ActionID": "Init"})
-        logger.Debug(result, err)
+        // If not error, processing result
     }
 }
 ```
