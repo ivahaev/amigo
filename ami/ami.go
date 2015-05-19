@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"net"
 	log "github.com/ivahaev/go-logger"
+	"net"
 	"strconv"
 	"time"
 )
@@ -93,10 +93,11 @@ func (a *AMIAdapter) Login(username string, password string) (chan map[string]st
 	}
 
 	var result = a.Exec(action)
+
 	if result["Response"] != "Success" {
-		a.Connected = true
 		return nil, errors.New("Login failed: " + result["Message"])
 	}
+	a.Connected = true
 
 	return a.chanEvents, nil
 }
