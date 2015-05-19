@@ -1,4 +1,4 @@
-package amiConnect
+package ami
 
 import (
 	"bufio"

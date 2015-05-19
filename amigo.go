@@ -1,14 +1,14 @@
 package amigo
 
 import (
-    "github.com/ivahaev/amigo/amiConnect"
+    "github.com/ivahaev/amigo/ami"
     log "github.com/ivahaev/go-logger"
     "time"
     "errors"
 )
 
 var err error
-var a *amiConnect.AMIAdapter
+var a *ami.AMIAdapter
 var events chan map[string]string
 var host = "127.0.0.1"
 var port = "5038"
