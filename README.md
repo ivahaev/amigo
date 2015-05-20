@@ -35,17 +35,17 @@ func main() {
     a := amigo.New("username", "password", "host", "port")
     a.Connect()
     
-    // Creating channel to receiving all events
-    c := make(chan map[string]string, 100)
-    
-    // Set created channel to receive all events
-    a.SetEventChannel(c)
     
     // Registering handler function for event "DeviceStateChange"
     a.RegisterHandler("DeviceStateChange", DeviceStateChangeHandler)
     
     // Registering default handler function for all events. 
     a.RegisterDefaultHandler(DefaultHandler)
+    
+    // Optionally Creating channel to receiving all events
+    // and set created channel to receive all events
+    c := make(chan map[string]string, 100)
+    a.SetEventChannel(c)
     
     
     // Check if connected with Asterisk, will send Action "QueueSummary"
