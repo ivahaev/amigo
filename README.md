@@ -18,6 +18,7 @@ import (
 )
 
 // Creating hanlder functions
+// amigo.M is a simple alias on map[string]string
 func DeviceStateChangeHandler (m amigo.M) {
     logger.Debug("DeviceStateChange event received", m)
 }
@@ -29,7 +30,8 @@ func DefaultHandler (m amigo.M) {
 
 func main() {
     
-    // Connect to Asterisk. Required parameters is username and password. Default host is "127.0.0.1", default port is "5038".
+    // Connect to Asterisk. Required arguments is username and password. 
+    // Default host is "127.0.0.1", default port is "5038".
     a := amigo.New("username", "password", "host", "port")
     a.Connect()
     
@@ -47,8 +49,8 @@ func main() {
     
     
     // Check if connected with Asterisk, will send Action "QueueSummary"
-    if amigo.Connected() {
-        result, err := amigo.Action(map[string]string{"Action": "QueueSummary", "ActionID": "Init"})
+    if a.Connected() {
+        result, err := a.Action(amigo.M{"Action": "QueueSummary", "ActionID": "Init"})
         // If not error, processing result. Response on Action will follow in defined events.
         // You need to catch them in event channel, DefaultHandler or specified HandlerFunction
     }
