@@ -16,6 +16,7 @@ Then use:
 ```go
 import (
     "github.com/ivahaev/amigo"
+    "github.com/ivahaev/go-logger"
 )
 
 // Creating hanlder functions

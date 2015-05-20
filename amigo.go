@@ -3,8 +3,8 @@ package amigo
 import (
 	"errors"
 	log "github.com/ivahaev/go-logger"
-	"time"
 	"sync"
+	"time"
 )
 
 type M map[string]string
@@ -12,21 +12,21 @@ type M map[string]string
 type handlerFunc func(M)
 
 type Amigo struct {
-	host string
-	port string
-	username string
-	secret string
-	ami *amiAdapter
-	events chan M
+	host           string
+	port           string
+	username       string
+	secret         string
+	ami            *amiAdapter
+	events         chan M
 	defaultChannel chan M
 	defaultHandler handlerFunc
-	handlers map[string]handlerFunc
-	mutex *sync.RWMutex
-	handlerMutex *sync.RWMutex
+	handlers       map[string]handlerFunc
+	mutex          *sync.RWMutex
+	handlerMutex   *sync.RWMutex
 }
 
 // Usage: amigo.New(username string, secret string, [host string, [port string]])
-func New (params ...string) *Amigo {
+func New(params ...string) *Amigo {
 	var ami *amiAdapter
 	var events chan M
 	var host = "127.0.0.1"
@@ -45,14 +45,14 @@ func New (params ...string) *Amigo {
 		host = params[2]
 	}
 	return &Amigo{
-		host: host,
-		port: port,
-		username: username,
-		secret: secret,
-		ami: ami,
-		events: events,
-		handlers: map[string]handlerFunc{},
-		mutex: &sync.RWMutex{},
+		host:         host,
+		port:         port,
+		username:     username,
+		secret:       secret,
+		ami:          ami,
+		events:       events,
+		handlers:     map[string]handlerFunc{},
+		mutex:        &sync.RWMutex{},
 		handlerMutex: &sync.RWMutex{},
 	}
 }
@@ -71,7 +71,7 @@ func (a *Amigo) Action(action M) (M, error) {
 
 // Connect with Asterisk.
 // If connect fails, will try to reconnect every second.
-func (a *Amigo) Connect () {
+func (a *Amigo) Connect() {
 	var err error
 	for {
 		am, err := newAMIAdapter(a.host, a.port)
@@ -99,7 +99,7 @@ func (a *Amigo) Connect () {
 
 	go func() {
 		for {
-			var e = <- a.events
+			var e = <-a.events
 
 			a.handlerMutex.RLock()
 			defer a.handlerMutex.RUnlock()
@@ -117,13 +117,13 @@ func (a *Amigo) Connect () {
 }
 
 // Returns true if successfully connected and logged in Asterisk and false otherwise.
-func (a *Amigo) Connected () bool {
+func (a *Amigo) Connected() bool {
 	a.mutex.RLock()
 	defer a.mutex.RUnlock()
 	return a.ami != nil && a.ami.Connected()
 }
 
-func (a *Amigo) RegisterDefaultHandler (f handlerFunc) error {
+func (a *Amigo) RegisterDefaultHandler(f handlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	if a.defaultHandler != nil {
@@ -133,7 +133,7 @@ func (a *Amigo) RegisterDefaultHandler (f handlerFunc) error {
 	return nil
 }
 
-func (a *Amigo) RegisterHandler (event string, f handlerFunc) error {
+func (a *Amigo) RegisterHandler(event string, f handlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	if a.handlers[event] != nil {
@@ -144,13 +144,13 @@ func (a *Amigo) RegisterHandler (event string, f handlerFunc) error {
 }
 
 // Set channel for receiving all events
-func (a *Amigo) SetEventChannel (c chan M) {
+func (a *Amigo) SetEventChannel(c chan M) {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	a.defaultChannel = c
 }
 
-func (a *Amigo) UnregisterDefaultHandler (f handlerFunc) error {
+func (a *Amigo) UnregisterDefaultHandler(f handlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	if a.defaultHandler == nil {
@@ -160,7 +160,7 @@ func (a *Amigo) UnregisterDefaultHandler (f handlerFunc) error {
 	return nil
 }
 
-func (a *Amigo) UnregisterHandler (event string, f handlerFunc) error {
+func (a *Amigo) UnregisterHandler(event string, f handlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	if a.handlers[event] == nil {

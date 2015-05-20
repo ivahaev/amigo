@@ -6,8 +6,8 @@ import (
 	"errors"
 	log "github.com/ivahaev/go-logger"
 	"net"
-	"time"
 	"sync"
+	"time"
 )
 
 type amiAdapter struct {
