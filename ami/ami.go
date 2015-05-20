@@ -6,8 +6,8 @@ import (
 	"errors"
 	log "github.com/ivahaev/go-logger"
 	"net"
-	"strconv"
 	"time"
+	"sync"
 )
 
 type AMIAdapter struct {
@@ -16,18 +16,19 @@ type AMIAdapter struct {
 	username string
 	password string
 
-	Connected     bool
+	connected     bool
 	chanActions   chan map[string]string
 	chanResponses chan map[string]string
 	chanEvents    chan map[string]string
 	chanErr       chan error
+	mutex         *sync.RWMutex
 }
 
 func NewAMIAdapter(ip string, port string) (*AMIAdapter, error) {
-
 	var a = new(AMIAdapter)
 	a.ip = ip
 	a.port = port
+	a.mutex = &sync.RWMutex{}
 
 	conn, err := a.openConnection()
 	if err != nil {
@@ -47,22 +48,19 @@ func NewAMIAdapter(ip string, port string) (*AMIAdapter, error) {
 		for {
 			err := <-chanErrStreamReader
 			chanQuitActionWriter <- true
-			a.Connected = false
+			a.mutex.Lock()
+			a.connected = false
+			a.mutex.Unlock()
 
 			log.Warn("TCP ERROR")
 
-			for i := 10000000; i >= 0; i-- {
-
-				if i == 0 {
-					log.Error("Reconnect failed 10000000 times. Give up!")
-				}
-
-				log.Warn("Try reconnect in 1 second")
+			for {
+				log.Info("Try reconnect in 1 second")
 				time.Sleep(time.Second * 1)
 
 				conn, err = a.openConnection()
 				if err != nil {
-					log.Warn("Reconnect failed! Retries remaining: " + strconv.Itoa(i))
+					log.Warn("Reconnect failed!")
 				} else {
 					chanErrStreamReader = streamReader(conn, chanOutStreamReader)
 					a.chanErr = chanErrStreamReader
@@ -81,8 +79,11 @@ func NewAMIAdapter(ip string, port string) (*AMIAdapter, error) {
 	return a, nil
 }
 
-func (a *AMIAdapter) Login(username string, password string) (chan map[string]string, error) {
+func (a *AMIAdapter) Connected() bool {
+	return a.connected
+}
 
+func (a *AMIAdapter) Login(username string, password string) (chan map[string]string, error) {
 	a.username = username
 	a.password = password
 
@@ -97,22 +98,21 @@ func (a *AMIAdapter) Login(username string, password string) (chan map[string]st
 	if result["Response"] != "Success" {
 		return nil, errors.New("Login failed: " + result["Message"])
 	}
-	a.Connected = true
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	a.connected = true
 
 	return a.chanEvents, nil
 }
 
 func (a *AMIAdapter) Exec(action map[string]string) map[string]string {
-
 	a.chanActions <- action
 	var response = <-a.chanResponses
 	return response
 }
 
 func streamReader(conn *net.TCPConn, chanOut chan byte) (chanErr chan error) {
-
 	chanErr = make(chan error)
-
 	reader := bufio.NewReader(conn)
 
 	go func() {
@@ -131,7 +131,6 @@ func streamReader(conn *net.TCPConn, chanOut chan byte) (chanErr chan error) {
 }
 
 func actionWriter(conn *net.TCPConn, in chan map[string]string, chanErr chan error) (chanQuit chan bool) {
-
 	chanQuit = make(chan bool)
 
 	go func() {
@@ -158,7 +157,6 @@ func actionWriter(conn *net.TCPConn, in chan map[string]string, chanErr chan err
 }
 
 func streamParser(in chan byte) (chanOut chan map[string]string) {
-
 	chanOut = make(chan map[string]string)
 
 	var data = make(map[string]string)
@@ -222,7 +220,6 @@ func streamParser(in chan byte) (chanOut chan map[string]string) {
 }
 
 func classifier(in chan map[string]string) (chanOutResponses chan map[string]string, chanOutEvents chan map[string]string) {
-
 	chanOutResponses = make(chan map[string]string)
 	chanOutEvents = make(chan map[string]string)
 
@@ -247,7 +244,6 @@ func classifier(in chan map[string]string) (chanOutResponses chan map[string]str
 }
 
 func (a *AMIAdapter) openConnection() (*net.TCPConn, error) {
-
 	socket := a.ip + ":" + a.port
 
 	raddr, err := net.ResolveTCPAddr("tcp", socket)
@@ -264,7 +260,6 @@ func (a *AMIAdapter) openConnection() (*net.TCPConn, error) {
 }
 
 func serialize(data map[string]string) []byte {
-
 	var outBuf bytes.Buffer
 
 	for key := range data {

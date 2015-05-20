@@ -1,5 +1,5 @@
 # amigo
-Asterisk AMI connector in golang
+Asterisk AMI connector on golang.
 
 Usage is pretty simple.
 
