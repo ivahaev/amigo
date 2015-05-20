@@ -4,6 +4,7 @@ Asterisk AMI connector on golang.
 Usage is pretty simple.
 
 To install:
+
 `go get github.com/ivahaev/amigo`
 
 Then import module to your project:
@@ -42,7 +43,7 @@ func main() {
     // Registering default handler function for all events. 
     a.RegisterDefaultHandler(DefaultHandler)
     
-    // Optionally Creating channel to receiving all events
+    // Optionally create channel to receiving all events
     // and set created channel to receive all events
     c := make(chan map[string]string, 100)
     a.SetEventChannel(c)

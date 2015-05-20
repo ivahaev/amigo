@@ -1,4 +1,4 @@
-package ami
+package amigo
 
 import (
 	"bufio"
@@ -10,22 +10,22 @@ import (
 	"sync"
 )
 
-type AMIAdapter struct {
+type amiAdapter struct {
 	ip       string
 	port     string
 	username string
 	password string
 
 	connected     bool
-	chanActions   chan map[string]string
-	chanResponses chan map[string]string
-	chanEvents    chan map[string]string
+	chanActions   chan M
+	chanResponses chan M
+	chanEvents    chan M
 	chanErr       chan error
 	mutex         *sync.RWMutex
 }
 
-func NewAMIAdapter(ip string, port string) (*AMIAdapter, error) {
-	var a = new(AMIAdapter)
+func newAMIAdapter(ip string, port string) (*amiAdapter, error) {
+	var a = new(amiAdapter)
 	a.ip = ip
 	a.port = port
 	a.mutex = &sync.RWMutex{}
@@ -36,7 +36,7 @@ func NewAMIAdapter(ip string, port string) (*AMIAdapter, error) {
 	}
 
 	chanOutStreamReader := make(chan byte)
-	a.chanActions = make(chan map[string]string)
+	a.chanActions = make(chan M)
 
 	chanErrStreamReader := streamReader(conn, chanOutStreamReader)
 	a.chanErr = chanErrStreamReader
@@ -79,15 +79,15 @@ func NewAMIAdapter(ip string, port string) (*AMIAdapter, error) {
 	return a, nil
 }
 
-func (a *AMIAdapter) Connected() bool {
+func (a *amiAdapter) Connected() bool {
 	return a.connected
 }
 
-func (a *AMIAdapter) Login(username string, password string) (chan map[string]string, error) {
+func (a *amiAdapter) Login(username string, password string) (chan M, error) {
 	a.username = username
 	a.password = password
 
-	var action = map[string]string{
+	var action = M{
 		"Action":   "Login",
 		"Username": a.username,
 		"Secret":   a.password,
@@ -105,7 +105,7 @@ func (a *AMIAdapter) Login(username string, password string) (chan map[string]st
 	return a.chanEvents, nil
 }
 
-func (a *AMIAdapter) Exec(action map[string]string) map[string]string {
+func (a *amiAdapter) Exec(action M) M {
 	a.chanActions <- action
 	var response = <-a.chanResponses
 	return response
@@ -130,7 +130,7 @@ func streamReader(conn *net.TCPConn, chanOut chan byte) (chanErr chan error) {
 	return chanErr
 }
 
-func actionWriter(conn *net.TCPConn, in chan map[string]string, chanErr chan error) (chanQuit chan bool) {
+func actionWriter(conn *net.TCPConn, in chan M, chanErr chan error) (chanQuit chan bool) {
 	chanQuit = make(chan bool)
 
 	go func() {
@@ -156,10 +156,10 @@ func actionWriter(conn *net.TCPConn, in chan map[string]string, chanErr chan err
 	return chanQuit
 }
 
-func streamParser(in chan byte) (chanOut chan map[string]string) {
-	chanOut = make(chan map[string]string)
+func streamParser(in chan byte) (chanOut chan M) {
+	chanOut = make(chan M)
 
-	var data = make(map[string]string)
+	var data = make(M)
 	var wordBuf bytes.Buffer
 	var key string
 	var value string
@@ -189,7 +189,7 @@ func streamParser(in chan byte) (chanOut chan map[string]string) {
 					} else if curByte == '\r' {
 						if len(value) > 0 {
 							chanOut <- data
-							data = make(map[string]string)
+							data = make(M)
 						}
 						wordBuf.Reset()
 						key = ""
@@ -219,9 +219,9 @@ func streamParser(in chan byte) (chanOut chan map[string]string) {
 	return chanOut
 }
 
-func classifier(in chan map[string]string) (chanOutResponses chan map[string]string, chanOutEvents chan map[string]string) {
-	chanOutResponses = make(chan map[string]string)
-	chanOutEvents = make(chan map[string]string)
+func classifier(in chan M) (chanOutResponses chan M, chanOutEvents chan M) {
+	chanOutResponses = make(chan M)
+	chanOutEvents = make(chan M)
 
 	go func() {
 		for {
@@ -243,7 +243,7 @@ func classifier(in chan map[string]string) (chanOutResponses chan map[string]str
 	return chanOutResponses, chanOutEvents
 }
 
-func (a *AMIAdapter) openConnection() (*net.TCPConn, error) {
+func (a *amiAdapter) openConnection() (*net.TCPConn, error) {
 	socket := a.ip + ":" + a.port
 
 	raddr, err := net.ResolveTCPAddr("tcp", socket)
@@ -259,7 +259,7 @@ func (a *AMIAdapter) openConnection() (*net.TCPConn, error) {
 	return conn, err
 }
 
-func serialize(data map[string]string) []byte {
+func serialize(data M) []byte {
 	var outBuf bytes.Buffer
 
 	for key := range data {
