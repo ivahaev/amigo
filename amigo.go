@@ -5,6 +5,7 @@ import (
 	log "github.com/ivahaev/go-logger"
 	"sync"
 	"time"
+	"strings"
 )
 
 type M map[string]string
@@ -109,8 +110,9 @@ func (a *Amigo) Connect() {
 			if a.defaultHandler != nil {
 				a.defaultHandler(e)
 			}
-			if e["Event"] != "" && a.handlers[e["Event"]] != nil {
-				a.handlers[e["Event"]](e)
+			var event = strings.ToUpper(e["Event"])
+			if event != "" && a.handlers[event] != nil {
+				a.handlers[event](e)
 			}
 		}
 	}()
@@ -134,6 +136,7 @@ func (a *Amigo) RegisterDefaultHandler(f handlerFunc) error {
 }
 
 func (a *Amigo) RegisterHandler(event string, f handlerFunc) error {
+	event = strings.ToUpper(event)
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	if a.handlers[event] != nil {
@@ -161,6 +164,7 @@ func (a *Amigo) UnregisterDefaultHandler(f handlerFunc) error {
 }
 
 func (a *Amigo) UnregisterHandler(event string, f handlerFunc) error {
+	event = strings.ToUpper(event)
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	if a.handlers[event] == nil {
