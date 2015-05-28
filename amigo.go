@@ -61,9 +61,9 @@ func New(params ...string) *Amigo {
 // Execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
 // Usage amigo.Action(action map[string]string)
 func (a *Amigo) Action(action M) (M, error) {
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
 	if a.Connected() {
+		a.mutex.Lock()
+		defer a.mutex.Unlock()
 		result := a.ami.Exec(action)
 		return result, nil
 	}
