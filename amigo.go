@@ -108,11 +108,11 @@ func (a *Amigo) Connect() {
 				a.defaultChannel <- e
 			}
 			if a.defaultHandler != nil {
-				a.defaultHandler(e)
+				go a.defaultHandler(e)
 			}
 			var event = strings.ToUpper(e["Event"])
 			if event != "" && a.handlers[event] != nil {
-				a.handlers[event](e)
+				go a.handlers[event](e)
 			}
 		}
 	}()
