@@ -62,7 +62,6 @@ func newAMIAdapter(ip string, port string) (*amiAdapter, error) {
 				conn, err = a.openConnection()
 				if err != nil {
 					log.Warn("Reconnect failed!")
-					conn.Close()
 				} else {
 					chanErrStreamReader = streamReader(conn, chanOutStreamReader)
 					a.chanErr = chanErrStreamReader

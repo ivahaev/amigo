@@ -2,10 +2,11 @@ package amigo
 
 import (
 	"errors"
+	"github.com/ivahaev/amigo/uuid"
 	log "github.com/ivahaev/go-logger"
+	"strings"
 	"sync"
 	"time"
-	"strings"
 )
 
 type M map[string]string
@@ -25,6 +26,17 @@ type Amigo struct {
 	mutex          *sync.RWMutex
 	handlerMutex   *sync.RWMutex
 }
+
+type agiCommand struct {
+	c        chan M
+	dateTime time.Time
+}
+
+// TODO: implement function to clear old data in handlers.
+var (
+	agiCommandsHandlers = make(map[string]agiCommand)
+	agiCommandsMutex    = &sync.Mutex{}
+)
 
 // Usage: amigo.New(username string, secret string, [host string, [port string]])
 func New(params ...string) *Amigo {
@@ -70,6 +82,36 @@ func (a *Amigo) Action(action M) (M, error) {
 	return nil, errors.New("Not connected to Asterisk")
 }
 
+// Execute Agi Actions in Asterisk. Returns full response.
+// Usage amigo.AgiAction(channel, command string)
+func (a *Amigo) AgiAction(channel, command string) (M, error) {
+	if !a.Connected() {
+		return nil, errors.New("Not connected to Asterisk")
+	}
+	commandId := uuid.NewV4()
+	action := M{
+		"Action":    "AGI",
+		"Channel":   channel,
+		"Command":   command,
+		"CommandID": commandId,
+	}
+
+	ac := agiCommand{make(chan M), time.Now()}
+	agiCommandsMutex.Lock()
+	agiCommandsHandlers[commandId] = ac
+	agiCommandsMutex.Unlock()
+
+	a.mutex.Lock()
+	result := a.ami.Exec(action)
+	a.mutex.Unlock()
+	if result["Response"] != "Success" {
+		return result, errors.New("Fail with command")
+	}
+	result = <-ac.c
+	delete(result, "CommandID")
+	return result, nil
+}
+
 // Connect with Asterisk.
 // If connect fails, will try to reconnect every second.
 func (a *Amigo) Connect() {
@@ -113,6 +155,21 @@ func (a *Amigo) Connect() {
 			var event = strings.ToUpper(e["Event"])
 			if event != "" && a.handlers[event] != nil {
 				go a.handlers[event](e)
+			}
+			if event == "ASYNCAGI" {
+				commandId, ok := e["CommandID"]
+				if !ok {
+					continue
+				}
+				agiCommandsMutex.Lock()
+				ac, ok := agiCommandsHandlers[commandId]
+				if ok {
+					delete(agiCommandsHandlers, commandId)
+					agiCommandsMutex.Unlock()
+					ac.c <- e
+				} else {
+					agiCommandsMutex.Unlock()
+				}
 			}
 		}
 	}()
