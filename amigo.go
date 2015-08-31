@@ -23,6 +23,7 @@ type Amigo struct {
 	defaultChannel chan M
 	defaultHandler handlerFunc
 	handlers       map[string]handlerFunc
+	capitalizeProps bool
 	mutex          *sync.RWMutex
 	handlerMutex   *sync.RWMutex
 }
@@ -68,6 +69,11 @@ func New(params ...string) *Amigo {
 		mutex:        &sync.RWMutex{},
 		handlerMutex: &sync.RWMutex{},
 	}
+}
+
+// If CapitalizeProps() calls with true, all prop's names will capitalized.
+func (a *Amigo) CapitalizeProps(c bool) {
+	a.capitalizeProps = c
 }
 
 // Execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
@@ -154,7 +160,15 @@ func (a *Amigo) Connect() {
 			}
 			var event = strings.ToUpper(e["Event"])
 			if event != "" && a.handlers[event] != nil {
-				go a.handlers[event](e)
+				if a.capitalizeProps {
+					ev := M{}
+					for k, v := range e {
+						ev[strings.ToUpper(k)] = v
+						go a.handlers[event](ev)
+					}
+				} else {
+					go a.handlers[event](e)
+				}
 			}
 			if event == "ASYNCAGI" {
 				commandId, ok := e["CommandID"]
