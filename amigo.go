@@ -83,6 +83,12 @@ func (a *Amigo) Action(action M) (M, error) {
 		a.mutex.Lock()
 		defer a.mutex.Unlock()
 		result := a.ami.Exec(action)
+		if a.capitalizeProps {
+			for k, v := range result {
+				result[strings.ToUpper(k)] = v
+				delete(result, k)
+			}
+		}
 		return result, nil
 	}
 	return nil, errors.New("Not connected to Asterisk")
@@ -115,6 +121,12 @@ func (a *Amigo) AgiAction(channel, command string) (M, error) {
 	}
 	result = <-ac.c
 	delete(result, "CommandID")
+	if a.capitalizeProps {
+		for k, v := range result {
+			result[strings.ToUpper(k)] = v
+			delete(result, k)
+		}
+	}
 	return result, nil
 }
 
