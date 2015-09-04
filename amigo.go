@@ -84,12 +84,14 @@ func (a *Amigo) Action(action M) (M, error) {
 		defer a.mutex.Unlock()
 		result := a.ami.Exec(action)
 		if a.capitalizeProps {
+			e := M{}
 			for k, v := range result {
-				result[strings.ToUpper(k)] = v
-				delete(result, k)
+				e[strings.ToUpper(k)] = v
 			}
+			return e, nil
+		} else {
+			return result, nil
 		}
-		return result, nil
 	}
 	return nil, errors.New("Not connected to Asterisk")
 }
@@ -176,8 +178,8 @@ func (a *Amigo) Connect() {
 					ev := M{}
 					for k, v := range e {
 						ev[strings.ToUpper(k)] = v
-						go a.handlers[event](ev)
 					}
+					go a.handlers[event](ev)
 				} else {
 					go a.handlers[event](e)
 				}
