@@ -169,9 +169,6 @@ func (a *Amigo) Connect() {
 			if a.defaultChannel != nil {
 				a.defaultChannel <- e
 			}
-			if a.defaultHandler != nil {
-				go a.defaultHandler(e)
-			}
 			var event = strings.ToUpper(e["Event"])
 			if event != "" && a.handlers[event] != nil {
 				if a.capitalizeProps {
@@ -180,7 +177,13 @@ func (a *Amigo) Connect() {
 						ev[strings.ToUpper(k)] = v
 					}
 					go a.handlers[event](ev)
+					if a.defaultHandler != nil {
+						go a.defaultHandler(ev)
+					}
 				} else {
+					if a.defaultHandler != nil {
+						go a.defaultHandler(e)
+					}
 					go a.handlers[event](e)
 				}
 			}
