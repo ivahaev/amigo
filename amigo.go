@@ -170,13 +170,15 @@ func (a *Amigo) Connect() {
 				a.defaultChannel <- e
 			}
 			var event = strings.ToUpper(e["Event"])
-			if event != "" && a.handlers[event] != nil {
+			if event != "" && (a.handlers[event] != nil || a.defaultHandler != nil) {
 				if a.capitalizeProps {
 					ev := M{}
 					for k, v := range e {
 						ev[strings.ToUpper(k)] = v
 					}
-					go a.handlers[event](ev)
+					if a.handlers[event] != nil {
+						go a.handlers[event](ev)
+					}
 					if a.defaultHandler != nil {
 						go a.defaultHandler(ev)
 					}
@@ -184,7 +186,9 @@ func (a *Amigo) Connect() {
 					if a.defaultHandler != nil {
 						go a.defaultHandler(e)
 					}
-					go a.handlers[event](e)
+					if a.handlers[event] != nil {
+						go a.handlers[event](e)
+					}
 				}
 			}
 			if event == "ASYNCAGI" {
