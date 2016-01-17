@@ -78,7 +78,7 @@ func (a *Amigo) CapitalizeProps(c bool) {
 
 // Execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
 // Usage amigo.Action(action map[string]string)
-func (a *Amigo) Action(action M) (M, error) {
+func (a *Amigo) Action(action map[string]string) (M, error) {
 	if a.Connected() {
 		a.mutex.Lock()
 		defer a.mutex.Unlock()
