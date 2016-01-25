@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	log "github.com/ivahaev/go-logger"
 	"net"
 	"sync"
 	"time"
+
+	log "github.com/ivahaev/go-logger"
 )
 
 type amiAdapter struct {
@@ -52,7 +53,7 @@ func newAMIAdapter(ip string, port string) (*amiAdapter, error) {
 			a.connected = false
 			a.mutex.Unlock()
 
-			log.Warn("TCP ERROR")
+			log.Warn("AMI TCP ERROR", err.Error())
 			conn.Close()
 
 			for {
@@ -61,15 +62,16 @@ func newAMIAdapter(ip string, port string) (*amiAdapter, error) {
 
 				conn, err = a.openConnection()
 				if err != nil {
-					log.Warn("Reconnect failed!")
+					log.Warn("AMI Reconnect failed!")
 				} else {
+					log.Info("AMI Connected")
 					chanErrStreamReader = streamReader(conn, chanOutStreamReader)
 					a.chanErr = chanErrStreamReader
 					chanQuitActionWriter = actionWriter(conn, a.chanActions, a.chanErr)
 
 					_, err = a.Login(a.username, a.password)
 					if err != nil {
-						log.Error("Login failed!")
+						log.Error("AMI Login failed!")
 					}
 					break
 				}
@@ -143,7 +145,6 @@ func actionWriter(conn *net.TCPConn, in chan M, chanErr chan error) (chanQuit ch
 					_, err := conn.Write(data)
 					if err != nil {
 						chanErr <- err
-						return
 					}
 				}
 			case <-chanQuit:

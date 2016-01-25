@@ -2,11 +2,12 @@ package amigo
 
 import (
 	"errors"
-	"github.com/ivahaev/amigo/uuid"
-	log "github.com/ivahaev/go-logger"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ivahaev/amigo/uuid"
+	log "github.com/ivahaev/go-logger"
 )
 
 type M map[string]string
@@ -14,18 +15,18 @@ type M map[string]string
 type handlerFunc func(M)
 
 type Amigo struct {
-	host           string
-	port           string
-	username       string
-	secret         string
-	ami            *amiAdapter
-	events         chan M
-	defaultChannel chan M
-	defaultHandler handlerFunc
-	handlers       map[string]handlerFunc
+	host            string
+	port            string
+	username        string
+	secret          string
+	ami             *amiAdapter
+	events          chan M
+	defaultChannel  chan M
+	defaultHandler  handlerFunc
+	handlers        map[string]handlerFunc
 	capitalizeProps bool
-	mutex          *sync.RWMutex
-	handlerMutex   *sync.RWMutex
+	mutex           *sync.RWMutex
+	handlerMutex    *sync.RWMutex
 }
 
 type agiCommand struct {
@@ -78,7 +79,7 @@ func (a *Amigo) CapitalizeProps(c bool) {
 
 // Execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
 // Usage amigo.Action(action map[string]string)
-func (a *Amigo) Action(action M) (M, error) {
+func (a *Amigo) Action(action map[string]string) (M, error) {
 	if a.Connected() {
 		a.mutex.Lock()
 		defer a.mutex.Unlock()
@@ -165,9 +166,11 @@ func (a *Amigo) Connect() {
 			var e = <-a.events
 
 			a.handlerMutex.RLock()
-			defer a.handlerMutex.RUnlock()
+
 			if a.defaultChannel != nil {
-				a.defaultChannel <- e
+				go func(e M) {
+					a.defaultChannel <- e
+				}(e)
 			}
 			var event = strings.ToUpper(e["Event"])
 			if event != "" && (a.handlers[event] != nil || a.defaultHandler != nil) {
@@ -194,6 +197,7 @@ func (a *Amigo) Connect() {
 			if event == "ASYNCAGI" {
 				commandId, ok := e["CommandID"]
 				if !ok {
+					a.handlerMutex.RUnlock()
 					continue
 				}
 				agiCommandsMutex.Lock()
@@ -206,6 +210,7 @@ func (a *Amigo) Connect() {
 					agiCommandsMutex.Unlock()
 				}
 			}
+			a.handlerMutex.RUnlock()
 		}
 	}()
 }
