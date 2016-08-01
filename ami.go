@@ -229,15 +229,12 @@ func classifier(in chan M) (chanOutResponses chan M, chanOutEvents chan M) {
 		for {
 			data := <-in
 
-			for d := range data {
-				switch d {
-				case "Response":
-					chanOutResponses <- data
-					break
-				case "Event":
-					chanOutEvents <- data
-					break
-				}
+			if _, ok := data["Event"]; ok {
+				chanOutEvents <- data
+				continue
+			}
+			if _, ok := data["Response"]; ok {
+				chanOutResponses <- data
 			}
 		}
 	}()
