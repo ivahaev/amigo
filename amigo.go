@@ -10,10 +10,12 @@ import (
 	log "github.com/ivahaev/go-logger"
 )
 
+// M is a short alias to map[string]string
 type M map[string]string
 
 type handlerFunc func(M)
 
+// Amigo is a main package struct
 type Amigo struct {
 	host            string
 	port            string
@@ -40,24 +42,18 @@ var (
 	agiCommandsMutex    = &sync.Mutex{}
 )
 
-// Usage: amigo.New(username string, secret string, [host string, [port string]])
-func New(params ...string) *Amigo {
+// New create new Amigo struct with credentials provided and returns pointer to it
+// Usage: New(username string, secret string, [host string, [port string]])
+func New(username, secret string, params ...string) *Amigo {
 	var ami *amiAdapter
 	var events chan M
 	var host = "127.0.0.1"
 	var port = "5038"
-	var username, secret string
-	if len(params) < 2 {
-		panic("Wrong params for connect with Asterisk")
-	}
-
-	username = params[0]
-	secret = params[1]
-	if len(params) == 4 {
-		host = params[2]
-		port = params[3]
-	} else if len(params) == 3 {
-		host = params[2]
+	if len(params) > 0 {
+		host = params[0]
+		if len(params) > 1 {
+			port = params[1]
+		}
 	}
 	return &Amigo{
 		host:         host,
@@ -72,12 +68,12 @@ func New(params ...string) *Amigo {
 	}
 }
 
-// If CapitalizeProps() calls with true, all prop's names will capitalized.
+// CapitalizeProps used to capitalise all prop's names when true provided.
 func (a *Amigo) CapitalizeProps(c bool) {
 	a.capitalizeProps = c
 }
 
-// Execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
+// Action used to execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
 // Usage amigo.Action(action map[string]string)
 func (a *Amigo) Action(action map[string]string) (M, error) {
 	if a.Connected() {
@@ -90,30 +86,29 @@ func (a *Amigo) Action(action map[string]string) (M, error) {
 				e[strings.ToUpper(k)] = v
 			}
 			return e, nil
-		} else {
-			return result, nil
 		}
+		return result, nil
 	}
 	return nil, errors.New("Not connected to Asterisk")
 }
 
-// Execute Agi Actions in Asterisk. Returns full response.
+// AgiAction used to execute Agi Actions in Asterisk. Returns full response.
 // Usage amigo.AgiAction(channel, command string)
 func (a *Amigo) AgiAction(channel, command string) (M, error) {
 	if !a.Connected() {
 		return nil, errors.New("Not connected to Asterisk")
 	}
-	commandId := uuid.NewV4()
+	commandID := uuid.NewV4()
 	action := M{
 		"Action":    "AGI",
 		"Channel":   channel,
 		"Command":   command,
-		"CommandID": commandId,
+		"CommandID": commandID,
 	}
 
 	ac := agiCommand{make(chan M), time.Now()}
 	agiCommandsMutex.Lock()
-	agiCommandsHandlers[commandId] = ac
+	agiCommandsHandlers[commandID] = ac
 	agiCommandsMutex.Unlock()
 
 	a.mutex.Lock()
@@ -195,15 +190,15 @@ func (a *Amigo) Connect() {
 				}
 			}
 			if event == "ASYNCAGI" {
-				commandId, ok := e["CommandID"]
+				commandID, ok := e["CommandID"]
 				if !ok {
 					a.handlerMutex.RUnlock()
 					continue
 				}
 				agiCommandsMutex.Lock()
-				ac, ok := agiCommandsHandlers[commandId]
+				ac, ok := agiCommandsHandlers[commandID]
 				if ok {
-					delete(agiCommandsHandlers, commandId)
+					delete(agiCommandsHandlers, commandID)
 					agiCommandsMutex.Unlock()
 					ac.c <- e
 				} else {
@@ -215,13 +210,14 @@ func (a *Amigo) Connect() {
 	}()
 }
 
-// Returns true if successfully connected and logged in Asterisk and false otherwise.
+// Connected returns true if successfully connected and logged in Asterisk and false otherwise.
 func (a *Amigo) Connected() bool {
 	a.mutex.RLock()
 	defer a.mutex.RUnlock()
 	return a.ami != nil && a.ami.Connected()
 }
 
+// RegisterDefaultHandler registers handler function that will called on each event
 func (a *Amigo) RegisterDefaultHandler(f handlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
@@ -232,6 +228,7 @@ func (a *Amigo) RegisterDefaultHandler(f handlerFunc) error {
 	return nil
 }
 
+// RegisterHandler registers handler function for provided event name
 func (a *Amigo) RegisterHandler(event string, f handlerFunc) error {
 	event = strings.ToUpper(event)
 	a.handlerMutex.Lock()
@@ -243,13 +240,14 @@ func (a *Amigo) RegisterHandler(event string, f handlerFunc) error {
 	return nil
 }
 
-// Set channel for receiving all events
+// SetEventChannel sets channel for receiving all events
 func (a *Amigo) SetEventChannel(c chan M) {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	a.defaultChannel = c
 }
 
+// UnregisterDefaultHandler removes default handler function
 func (a *Amigo) UnregisterDefaultHandler(f handlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
@@ -260,6 +258,7 @@ func (a *Amigo) UnregisterDefaultHandler(f handlerFunc) error {
 	return nil
 }
 
+// UnregisterHandler removes handler function for provided event name
 func (a *Amigo) UnregisterHandler(event string, f handlerFunc) error {
 	event = strings.ToUpper(event)
 	a.handlerMutex.Lock()
