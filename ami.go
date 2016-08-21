@@ -175,7 +175,7 @@ func streamParser(in chan byte) (chanOut chan M) {
 			lastByte = curByte
 			curByte = <-in
 
-			if curByte == ':' || curByte == '\n' {
+			if state == 0 && (curByte == ':' || curByte == '\n') {
 				continue
 			}
 
