@@ -2,18 +2,19 @@ package amigo
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ivahaev/amigo/uuid"
-	log "github.com/ivahaev/go-logger"
 )
 
 // M is a short alias to map[string]string
 type M map[string]string
 
-type handlerFunc func(M)
+type handlerFunc func(map[string]string)
+type eventHandlerFunc func(string)
 
 // Amigo is a main package struct
 type Amigo struct {
@@ -26,6 +27,7 @@ type Amigo struct {
 	defaultChannel  chan M
 	defaultHandler  handlerFunc
 	handlers        map[string]handlerFunc
+	eventHandlers   map[string][]eventHandlerFunc
 	capitalizeProps bool
 	mutex           *sync.RWMutex
 	handlerMutex    *sync.RWMutex
@@ -56,15 +58,16 @@ func New(username, secret string, params ...string) *Amigo {
 		}
 	}
 	return &Amigo{
-		host:         host,
-		port:         port,
-		username:     username,
-		secret:       secret,
-		ami:          ami,
-		events:       events,
-		handlers:     map[string]handlerFunc{},
-		mutex:        &sync.RWMutex{},
-		handlerMutex: &sync.RWMutex{},
+		host:          host,
+		port:          port,
+		username:      username,
+		secret:        secret,
+		ami:           ami,
+		events:        events,
+		handlers:      map[string]handlerFunc{},
+		eventHandlers: map[string][]eventHandlerFunc{},
+		mutex:         &sync.RWMutex{},
+		handlerMutex:  &sync.RWMutex{},
 	}
 }
 
@@ -133,9 +136,9 @@ func (a *Amigo) AgiAction(channel, command string) (M, error) {
 func (a *Amigo) Connect() {
 	var err error
 	for {
-		am, err := newAMIAdapter(a.host, a.port)
+		am, err := newAMIAdapter(a.host, a.port, a.emitEvent)
 		if err != nil {
-			log.Error("AMI Connect error", err.Error())
+			go a.emitEvent("error", fmt.Sprintf("AMI Connect error: %s", err.Error()))
 		} else {
 			a.mutex.Lock()
 			a.ami = am
@@ -144,17 +147,16 @@ func (a *Amigo) Connect() {
 		}
 		time.Sleep(time.Second)
 	}
-	log.Info("Connected to Asterisk", a.host, a.port)
+	go a.emitEvent("connect", fmt.Sprintf("Connected to Asterisk: %s, %s", a.host, a.port))
 
 	events, err := a.ami.Login(a.username, a.secret)
 	a.mutex.Lock()
 	a.events = events
 	a.mutex.Unlock()
 	if err != nil {
-		log.Error("Asterisk login error", err.Error())
+		go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
 		return
 	}
-	log.Info("Logged into Asterisk", a.host, a.port, a.username)
 
 	go func() {
 		for {
@@ -217,6 +219,15 @@ func (a *Amigo) Connected() bool {
 	return a.ami != nil && a.ami.Connected()
 }
 
+// On register handler for package events. Now amigo will emit two types of events:
+// "connect" fired on connection success and "error" on any error occured.
+func (a *Amigo) On(event string, handler func(string)) {
+	if _, ok := a.eventHandlers[event]; !ok {
+		a.eventHandlers[event] = []eventHandlerFunc{}
+	}
+	a.eventHandlers[event] = append(a.eventHandlers[event], handler)
+}
+
 // RegisterDefaultHandler registers handler function that will called on each event
 func (a *Amigo) RegisterDefaultHandler(f handlerFunc) error {
 	a.handlerMutex.Lock()
@@ -268,4 +279,22 @@ func (a *Amigo) UnregisterHandler(event string, f handlerFunc) error {
 	}
 	a.handlers[event] = nil
 	return nil
+}
+
+func (a *Amigo) emitEvent(name, message string) {
+	a.handlerMutex.RLock()
+	defer a.handlerMutex.RUnlock()
+
+	if len(a.eventHandlers) == 0 {
+		return
+	}
+
+	handlers, ok := a.eventHandlers[name]
+	if !ok {
+		return
+	}
+
+	for _, h := range handlers {
+		h(message)
+	}
 }

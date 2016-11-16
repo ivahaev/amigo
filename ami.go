@@ -4,11 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
-
-	log "github.com/ivahaev/go-logger"
 )
 
 type amiAdapter struct {
@@ -23,13 +22,15 @@ type amiAdapter struct {
 	chanEvents    chan M
 	chanErr       chan error
 	mutex         *sync.RWMutex
+	emitEvent     func(string, string)
 }
 
-func newAMIAdapter(ip string, port string) (*amiAdapter, error) {
+func newAMIAdapter(ip string, port string, eventEmitter func(string, string)) (*amiAdapter, error) {
 	var a = new(amiAdapter)
 	a.ip = ip
 	a.port = port
 	a.mutex = &sync.RWMutex{}
+	a.emitEvent = eventEmitter
 
 	conn, err := a.openConnection()
 	if err != nil {
@@ -53,25 +54,24 @@ func newAMIAdapter(ip string, port string) (*amiAdapter, error) {
 			a.connected = false
 			a.mutex.Unlock()
 
-			log.Warn("AMI TCP ERROR", err.Error())
+			go a.emitEvent("error", fmt.Sprintf("AMI TCP ERROR: %s", err.Error()))
 			conn.Close()
 
 			for {
-				log.Info("Try reconnect in 1 second")
 				time.Sleep(time.Second * 1)
 
 				conn, err = a.openConnection()
 				if err != nil {
-					log.Warn("AMI Reconnect failed!")
+					go a.emitEvent("error", "AMI Reconnect failed")
 				} else {
-					log.Info("AMI Connected")
+					// go a.emitEvent("connect", fmt.Sprintf("Connected to Asterisk: %s, %s", a.host, a.port))
 					chanErrStreamReader = streamReader(conn, chanOutStreamReader)
 					a.chanErr = chanErrStreamReader
 					chanQuitActionWriter = actionWriter(conn, a.chanActions, a.chanErr)
 
 					_, err = a.Login(a.username, a.password)
 					if err != nil {
-						log.Error("AMI Login failed!")
+						go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
 					}
 					break
 				}
@@ -122,7 +122,6 @@ func streamReader(conn *net.TCPConn, chanOut chan byte) (chanErr chan error) {
 		for {
 			b, err := reader.ReadByte()
 			if err != nil {
-				log.Error("AMI error:", err)
 				chanErr <- err
 				return
 			}
