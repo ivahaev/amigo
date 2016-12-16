@@ -17,9 +17,9 @@ type amiAdapter struct {
 	password string
 
 	connected     bool
-	chanActions   chan M
-	chanResponses chan M
-	chanEvents    chan M
+	chanActions   chan map[string]string
+	chanResponses chan map[string]string
+	chanEvents    chan map[string]string
 	chanErr       chan error
 	mutex         *sync.RWMutex
 	emitEvent     func(string, string)
@@ -38,7 +38,7 @@ func newAMIAdapter(ip string, port string, eventEmitter func(string, string)) (*
 	}
 
 	chanOutStreamReader := make(chan byte)
-	a.chanActions = make(chan M)
+	a.chanActions = make(chan map[string]string)
 
 	chanErrStreamReader := streamReader(conn, chanOutStreamReader)
 	a.chanErr = chanErrStreamReader
@@ -86,11 +86,11 @@ func (a *amiAdapter) Connected() bool {
 	return a.connected
 }
 
-func (a *amiAdapter) Login(username string, password string) (chan M, error) {
+func (a *amiAdapter) Login(username string, password string) (chan map[string]string, error) {
 	a.username = username
 	a.password = password
 
-	var action = M{
+	var action = map[string]string{
 		"Action":   "Login",
 		"Username": a.username,
 		"Secret":   a.password,
@@ -108,7 +108,7 @@ func (a *amiAdapter) Login(username string, password string) (chan M, error) {
 	return a.chanEvents, nil
 }
 
-func (a *amiAdapter) Exec(action M) M {
+func (a *amiAdapter) Exec(action map[string]string) map[string]string {
 	a.chanActions <- action
 	var response = <-a.chanResponses
 	return response
@@ -132,7 +132,7 @@ func streamReader(conn *net.TCPConn, chanOut chan byte) (chanErr chan error) {
 	return chanErr
 }
 
-func actionWriter(conn *net.TCPConn, in chan M, chanErr chan error) (chanQuit chan bool) {
+func actionWriter(conn *net.TCPConn, in chan map[string]string, chanErr chan error) (chanQuit chan bool) {
 	chanQuit = make(chan bool)
 
 	go func() {
@@ -157,10 +157,10 @@ func actionWriter(conn *net.TCPConn, in chan M, chanErr chan error) (chanQuit ch
 	return chanQuit
 }
 
-func streamParser(in chan byte) (chanOut chan M) {
-	chanOut = make(chan M)
+func streamParser(in chan byte) (chanOut chan map[string]string) {
+	chanOut = make(chan map[string]string)
 
-	var data = make(M)
+	var data = make(map[string]string)
 	var wordBuf bytes.Buffer
 	var key string
 	var value string
@@ -190,7 +190,7 @@ func streamParser(in chan byte) (chanOut chan M) {
 					} else if curByte == '\r' {
 						if len(value) > 0 {
 							chanOut <- data
-							data = make(M)
+							data = make(map[string]string)
 						}
 						wordBuf.Reset()
 						key = ""
@@ -220,9 +220,9 @@ func streamParser(in chan byte) (chanOut chan M) {
 	return chanOut
 }
 
-func classifier(in chan M) (chanOutResponses chan M, chanOutEvents chan M) {
-	chanOutResponses = make(chan M)
-	chanOutEvents = make(chan M)
+func classifier(in chan map[string]string) (chanOutResponses chan map[string]string, chanOutEvents chan map[string]string) {
+	chanOutResponses = make(chan map[string]string)
+	chanOutEvents = make(chan map[string]string)
 
 	go func() {
 		for {
@@ -257,7 +257,7 @@ func (a *amiAdapter) openConnection() (*net.TCPConn, error) {
 	return conn, err
 }
 
-func serialize(data M) []byte {
+func serialize(data map[string]string) []byte {
 	var outBuf bytes.Buffer
 
 	for key := range data {

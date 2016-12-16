@@ -10,9 +10,6 @@ import (
 	"github.com/ivahaev/amigo/uuid"
 )
 
-// M is a short alias to map[string]string
-type M map[string]string
-
 type handlerFunc func(map[string]string)
 type eventHandlerFunc func(string)
 
@@ -23,8 +20,8 @@ type Amigo struct {
 	username        string
 	secret          string
 	ami             *amiAdapter
-	events          chan M
-	defaultChannel  chan M
+	events          chan map[string]string
+	defaultChannel  chan map[string]string
 	defaultHandler  handlerFunc
 	handlers        map[string]handlerFunc
 	eventHandlers   map[string][]eventHandlerFunc
@@ -34,7 +31,7 @@ type Amigo struct {
 }
 
 type agiCommand struct {
-	c        chan M
+	c        chan map[string]string
 	dateTime time.Time
 }
 
@@ -48,7 +45,7 @@ var (
 // Usage: New(username string, secret string, [host string, [port string]])
 func New(username, secret string, params ...string) *Amigo {
 	var ami *amiAdapter
-	var events chan M
+	var events chan map[string]string
 	var host = "127.0.0.1"
 	var port = "5038"
 	if len(params) > 0 {
@@ -78,13 +75,13 @@ func (a *Amigo) CapitalizeProps(c bool) {
 
 // Action used to execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
 // Usage amigo.Action(action map[string]string)
-func (a *Amigo) Action(action map[string]string) (M, error) {
+func (a *Amigo) Action(action map[string]string) (map[string]string, error) {
 	if a.Connected() {
 		a.mutex.Lock()
 		defer a.mutex.Unlock()
 		result := a.ami.Exec(action)
 		if a.capitalizeProps {
-			e := M{}
+			e := map[string]string{}
 			for k, v := range result {
 				e[strings.ToUpper(k)] = v
 			}
@@ -97,19 +94,19 @@ func (a *Amigo) Action(action map[string]string) (M, error) {
 
 // AgiAction used to execute Agi Actions in Asterisk. Returns full response.
 // Usage amigo.AgiAction(channel, command string)
-func (a *Amigo) AgiAction(channel, command string) (M, error) {
+func (a *Amigo) AgiAction(channel, command string) (map[string]string, error) {
 	if !a.Connected() {
 		return nil, errors.New("Not connected to Asterisk")
 	}
 	commandID := uuid.NewV4()
-	action := M{
+	action := map[string]string{
 		"Action":    "AGI",
 		"Channel":   channel,
 		"Command":   command,
 		"CommandID": commandID,
 	}
 
-	ac := agiCommand{make(chan M), time.Now()}
+	ac := agiCommand{make(chan map[string]string), time.Now()}
 	agiCommandsMutex.Lock()
 	agiCommandsHandlers[commandID] = ac
 	agiCommandsMutex.Unlock()
@@ -165,14 +162,14 @@ func (a *Amigo) Connect() {
 			a.handlerMutex.RLock()
 
 			if a.defaultChannel != nil {
-				go func(e M) {
+				go func(e map[string]string) {
 					a.defaultChannel <- e
 				}(e)
 			}
 			var event = strings.ToUpper(e["Event"])
 			if event != "" && (a.handlers[event] != nil || a.defaultHandler != nil) {
 				if a.capitalizeProps {
-					ev := M{}
+					ev := map[string]string{}
 					for k, v := range e {
 						ev[strings.ToUpper(k)] = v
 					}
@@ -252,7 +249,7 @@ func (a *Amigo) RegisterHandler(event string, f handlerFunc) error {
 }
 
 // SetEventChannel sets channel for receiving all events
-func (a *Amigo) SetEventChannel(c chan M) {
+func (a *Amigo) SetEventChannel(c chan map[string]string) {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	a.defaultChannel = c
