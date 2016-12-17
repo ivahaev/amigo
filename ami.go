@@ -17,7 +17,7 @@ type amiAdapter struct {
 	username string
 	password string
 
-	conn          *net.TCPConn
+	conn          net.Conn
 	connected     bool
 	chanActions   chan map[string]string
 	chanResponses chan map[string]string
@@ -193,15 +193,10 @@ func classifier(in chan map[string]string) (chanOutResponses chan map[string]str
 	return chanOutResponses, chanOutEvents
 }
 
-func (a *amiAdapter) openConnection() (*net.TCPConn, error) {
+func (a *amiAdapter) openConnection() (net.Conn, error) {
 	socket := a.ip + ":" + a.port
 
-	raddr, err := net.ResolveTCPAddr("tcp", socket)
-	if err != nil {
-		return nil, err
-	}
-
-	conn, err := net.DialTCP("tcp", nil, raddr)
+	conn, err := net.DialTimeout("tcp", socket, time.Second*10)
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +253,9 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 		}
 		value := string(kv[i:])
 
+		if key == "Extra" && len(m[key]) > 0 {
+			value = m[key] + "\n" + value
+		}
 		m[key] = value
 
 		if err != nil {
