@@ -3,6 +3,7 @@ package amigo
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"strconv"
 	"testing"
 )
@@ -36,7 +37,7 @@ ActiveChannels:
 			"DeviceState":    "Unavailable",
 			"ActiveChannels": "",
 		},
-		nil,
+		io.EOF,
 	},
 	{
 		`Response: Follows
@@ -48,7 +49,7 @@ No such command 'core show hi' (type 'core show help core show hi' for other pos
 			"Privilege": "Command",
 			"Extra":     "No such command 'core show hi' (type 'core show help core show hi' for other possible commands)",
 		},
-		nil,
+		io.EOF,
 	},
 }
 

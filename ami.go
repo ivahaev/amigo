@@ -224,7 +224,7 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 	for {
 		kv, _, err := r.ReadLine()
 		if len(kv) == 0 {
-			if err == io.EOF {
+			if err == io.EOF && len(m) == 0 {
 				err = nil
 			}
 			return m, err
