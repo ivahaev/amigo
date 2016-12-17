@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ type amiAdapter struct {
 	username string
 	password string
 
+	conn          *net.TCPConn
 	connected     bool
 	chanActions   chan map[string]string
 	chanResponses chan map[string]string
@@ -37,14 +39,13 @@ func newAMIAdapter(ip string, port string, eventEmitter func(string, string)) (*
 		return nil, err
 	}
 
-	chanOutStreamReader := make(chan byte)
+	a.conn = conn
 	a.chanActions = make(chan map[string]string)
 
-	chanErrStreamReader := streamReader(conn, chanOutStreamReader)
+	chanOutStreamReader, chanErrStreamReader := a.streamReader()
 	a.chanErr = chanErrStreamReader
-	chanQuitActionWriter := actionWriter(conn, a.chanActions, a.chanErr)
-	chanOutStreamParser := streamParser(chanOutStreamReader)
-	a.chanResponses, a.chanEvents = classifier(chanOutStreamParser)
+	chanQuitActionWriter := a.actionWriter()
+	a.chanResponses, a.chanEvents = classifier(chanOutStreamReader)
 
 	go func() {
 		for {
@@ -64,10 +65,10 @@ func newAMIAdapter(ip string, port string, eventEmitter func(string, string)) (*
 				if err != nil {
 					go a.emitEvent("error", "AMI Reconnect failed")
 				} else {
-					// go a.emitEvent("connect", fmt.Sprintf("Connected to Asterisk: %s, %s", a.host, a.port))
-					chanErrStreamReader = streamReader(conn, chanOutStreamReader)
+					a.conn = conn
+					chanOutStreamReader, chanErrStreamReader = a.streamReader()
 					a.chanErr = chanErrStreamReader
-					chanQuitActionWriter = actionWriter(conn, a.chanActions, a.chanErr)
+					chanQuitActionWriter = a.actionWriter()
 
 					_, err = a.Login(a.username, a.password)
 					if err != nil {
@@ -114,13 +115,26 @@ func (a *amiAdapter) Exec(action map[string]string) map[string]string {
 	return response
 }
 
-func streamReader(conn *net.TCPConn, chanOut chan byte) (chanErr chan error) {
+func (a *amiAdapter) streamReader() (chanOut chan map[string]string, chanErr chan error) {
+	chanOut = make(chan map[string]string)
 	chanErr = make(chan error)
-	reader := bufio.NewReader(conn)
+
+	bufReader := bufio.NewReader(a.conn)
+	greetings := make([]byte, 100)
+	n, err := bufReader.Read(greetings)
+	if err != nil {
+		chanErr <- err
+		return
+	}
+	if n > 2 {
+		greetings = greetings[:n-2]
+	}
+	go a.emitEvent("connect", fmt.Sprintf("Connected to %s %s:%s", greetings, a.ip, a.port))
 
 	go func() {
+		var b map[string]string
 		for {
-			b, err := reader.ReadByte()
+			b, err = readMessage(bufReader)
 			if err != nil {
 				chanErr <- err
 				return
@@ -129,21 +143,21 @@ func streamReader(conn *net.TCPConn, chanOut chan byte) (chanErr chan error) {
 		}
 	}()
 
-	return chanErr
+	return chanOut, chanErr
 }
 
-func actionWriter(conn *net.TCPConn, in chan map[string]string, chanErr chan error) (chanQuit chan bool) {
+func (a *amiAdapter) actionWriter() (chanQuit chan bool) {
 	chanQuit = make(chan bool)
 
 	go func() {
 		for {
 			select {
-			case action := <-in:
+			case action := <-a.chanActions:
 				{
 					var data = serialize(action)
-					_, err := conn.Write(data)
+					_, err := a.conn.Write(data)
 					if err != nil {
-						chanErr <- err
+						a.chanErr <- err
 					}
 				}
 			case <-chanQuit:
@@ -155,69 +169,6 @@ func actionWriter(conn *net.TCPConn, in chan map[string]string, chanErr chan err
 	}()
 
 	return chanQuit
-}
-
-func streamParser(in chan byte) (chanOut chan map[string]string) {
-	chanOut = make(chan map[string]string)
-
-	var data = make(map[string]string)
-	var wordBuf bytes.Buffer
-	var key string
-	var value string
-	var lastByte byte
-	var curByte byte
-	var state = 0 // 0: key state, 1: value state
-
-	go func() {
-
-		for {
-			lastByte = curByte
-			curByte = <-in
-
-			if state == 0 && (curByte == ':' || curByte == '\n') {
-				continue
-			}
-
-			switch state {
-			case 0:
-				{
-					if curByte == ' ' {
-						if lastByte == ':' {
-							key = wordBuf.String()
-							wordBuf.Reset()
-							state = 1
-						}
-					} else if curByte == '\r' {
-						if len(value) > 0 {
-							chanOut <- data
-							data = make(map[string]string)
-						}
-						wordBuf.Reset()
-						key = ""
-						value = ""
-						lastByte = 0
-						curByte = 0
-						state = 0
-					} else {
-						wordBuf.WriteByte(curByte)
-					}
-				}
-			case 1:
-				{
-					if curByte == '\r' {
-						value = wordBuf.String()
-						wordBuf.Reset()
-						state = 0
-						data[key] = value
-					} else {
-						wordBuf.WriteByte(curByte)
-					}
-				}
-			}
-		}
-	}()
-
-	return chanOut
 }
 
 func classifier(in chan map[string]string) (chanOutResponses chan map[string]string, chanOutEvents chan map[string]string) {
@@ -232,6 +183,7 @@ func classifier(in chan map[string]string) (chanOutResponses chan map[string]str
 				chanOutEvents <- data
 				continue
 			}
+
 			if _, ok := data["Response"]; ok {
 				chanOutResponses <- data
 			}
@@ -270,4 +222,46 @@ func serialize(data map[string]string) []byte {
 	}
 	outBuf.WriteString("\n")
 	return outBuf.Bytes()
+}
+
+func readMessage(r *bufio.Reader) (m map[string]string, err error) {
+	m = make(map[string]string)
+	for {
+		kv, _, err := r.ReadLine()
+		if len(kv) == 0 {
+			if err == io.EOF {
+				err = nil
+			}
+			return m, err
+		}
+
+		var key string
+		i := bytes.IndexByte(kv, ':')
+		if i >= 0 {
+			endKey := i
+			for endKey > 0 && kv[endKey-1] == ' ' {
+				endKey--
+			}
+			key = string(kv[:endKey])
+		} else {
+			key = "Extra"
+		}
+
+		if key == "" {
+			continue
+		}
+
+		// Skip initial spaces in value.
+		i++ // skip colon
+		for i < len(kv) && (kv[i] == ' ' || kv[i] == '\t') {
+			i++
+		}
+		value := string(kv[i:])
+
+		m[key] = value
+
+		if err != nil {
+			return m, err
+		}
+	}
 }

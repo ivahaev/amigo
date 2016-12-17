@@ -49,7 +49,6 @@ func main() {
 
 	// Registering handler function for event "DeviceStateChange"
 	a.RegisterHandler("DeviceStateChange", DeviceStateChangeHandler)
-	// a.RegisterHandler("Dial", DeviceStateChangeHandler)
 
 	// Registering default handler function for all events.
 	a.RegisterDefaultHandler(DefaultHandler)
