@@ -1,6 +1,9 @@
 # amigo
 Asterisk AMI connector on golang.
 
+Attention!
+API has been changed in v0.1.2. Please read the godoc.
+
 Usage is pretty simple.
 
 To install:
@@ -34,9 +37,9 @@ func DefaultHandler(m map[string]string) {
 func main() {
 	fmt.Println("Init Amigo")
 
-	// Connect to Asterisk. Required arguments is username and password.
-	// Default host is "127.0.0.1", default port is "5038".
-	a := amigo.New("username", "password", "host", "port")
+	settings := &amigo.Settings{Username: "username", Password: "password", Host: "host"}
+	a := amigo.New(settings)
+
 	a.Connect()
 
 	// Listen for connection events
