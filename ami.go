@@ -9,8 +9,6 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	logger "github.com/ivahaev/go-logger"
 )
 
 type amiAdapter struct {
@@ -135,15 +133,12 @@ func (a *amiAdapter) streamReader() (chanOut chan map[string]string, chanErr cha
 
 	go func() {
 		var b map[string]string
-		var i int
 		for {
 			b, err = readMessage(bufReader)
 			if err != nil {
 				chanErr <- err
 				return
 			}
-			i++
-			logger.Warn("Message count", i, b, err)
 			chanOut <- b
 		}
 	}()
