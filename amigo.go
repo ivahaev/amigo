@@ -10,6 +10,10 @@ import (
 	"github.com/ivahaev/amigo/uuid"
 )
 
+var (
+	version = "0.1.1"
+)
+
 type handlerFunc func(map[string]string)
 type eventHandlerFunc func(string)
 
