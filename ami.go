@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 )
@@ -227,6 +226,7 @@ func serialize(data map[string]string) []byte {
 
 func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 	m = make(map[string]string)
+	var responseFollows bool
 	for {
 		kv, _, err := r.ReadLine()
 		if len(kv) == 0 {
@@ -244,11 +244,20 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 				endKey--
 			}
 			key = string(kv[:endKey])
-		} else {
-			key = "Extra"
 		}
 
-		if key == "" {
+		if key == "" && !responseFollows {
+			continue
+		}
+
+		if responseFollows && key != "Privilege" {
+			if string(kv) != "--END COMMAND--" {
+				m["CommandResponse"] = fmt.Sprintf("%s\n%s", m["CommandResponse"], string(kv))
+			}
+			if err != nil {
+				return m, err
+			}
+
 			continue
 		}
 
@@ -259,14 +268,11 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 		}
 		value := string(kv[i:])
 
-		if m[key] == "" {
-			m[key] = value
-		} else {
-			if value == "--END COMMAND--" {
-				continue
-			}
-			m[key] = fmt.Sprintf("%s\n%s", m[key], strings.TrimSpace(value))
+		if key == "Response" && value == "Follows" {
+			responseFollows = true
 		}
+
+		m[key] = value
 
 		if err != nil {
 			return m, err
