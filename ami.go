@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -264,7 +265,7 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 			if value == "--END COMMAND--" {
 				continue
 			}
-			m[key] = m[key] + " " + value
+			m[key] = fmt.Sprintf("%s\n%s", m[key], strings.TrimSpace(value))
 		}
 
 		if err != nil {
