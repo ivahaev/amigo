@@ -41,7 +41,7 @@ var (
 	agiCommandsMutex    = &sync.Mutex{}
 )
 
-// New create new Amigo struct with credentials provided and returns pointer to it
+// New creates new Amigo struct with credentials provided and returns pointer to it
 // Usage: New(username string, secret string, [host string, [port string]])
 func New(username, secret string, params ...string) *Amigo {
 	var ami *amiAdapter
@@ -79,7 +79,7 @@ func (a *Amigo) Action(action map[string]string) (map[string]string, error) {
 	if a.Connected() {
 		a.mutex.Lock()
 		defer a.mutex.Unlock()
-		result := a.ami.Exec(action)
+		result := a.ami.exec(action)
 		if a.capitalizeProps {
 			e := map[string]string{}
 			for k, v := range result {
@@ -112,7 +112,7 @@ func (a *Amigo) AgiAction(channel, command string) (map[string]string, error) {
 	agiCommandsMutex.Unlock()
 
 	a.mutex.Lock()
-	result := a.ami.Exec(action)
+	result := a.ami.exec(action)
 	a.mutex.Unlock()
 	if result["Response"] != "Success" {
 		return result, errors.New("Fail with command")
@@ -133,7 +133,7 @@ func (a *Amigo) AgiAction(channel, command string) (map[string]string, error) {
 func (a *Amigo) Connect() {
 	var err error
 	for {
-		am, err := newAMIAdapter(a.host, a.port, a.emitEvent)
+		am, err := newAMIAdapter(a.host, a.port, a.username, a.secret, a.emitEvent)
 		if err != nil {
 			go a.emitEvent("error", fmt.Sprintf("AMI Connect error: %s", err.Error()))
 		} else {
@@ -144,12 +144,7 @@ func (a *Amigo) Connect() {
 		}
 		time.Sleep(time.Second)
 	}
-	go a.emitEvent("connect", fmt.Sprintf("Connected to Asterisk: %s, %s", a.host, a.port))
 
-	events, err := a.ami.Login(a.username, a.secret)
-	a.mutex.Lock()
-	a.events = events
-	a.mutex.Unlock()
 	if err != nil {
 		go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
 		return
@@ -157,7 +152,7 @@ func (a *Amigo) Connect() {
 
 	go func() {
 		for {
-			var e = <-a.events
+			var e = <-a.ami.EventsChan
 
 			a.handlerMutex.RLock()
 
@@ -213,7 +208,7 @@ func (a *Amigo) Connect() {
 func (a *Amigo) Connected() bool {
 	a.mutex.RLock()
 	defer a.mutex.RUnlock()
-	return a.ami != nil && a.ami.Connected()
+	return a.ami != nil && a.ami.online()
 }
 
 // On register handler for package events. Now amigo will emit two types of events:

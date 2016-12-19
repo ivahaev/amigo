@@ -5,32 +5,40 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/ivahaev/amigo/uuid"
 )
 
+var actionTimeout = time.Second * 3
+
 type amiAdapter struct {
+	EventsChan chan map[string]string
+
 	ip       string
 	port     string
 	username string
 	password string
 
-	conn          *net.TCPConn
-	connected     bool
-	chanActions   chan map[string]string
-	chanResponses chan map[string]string
-	chanEvents    chan map[string]string
-	chanErr       chan error
+	conn      *net.TCPConn
+	connected bool
+
+	actionsChan   chan map[string]string
+	responseChans map[string]chan map[string]string
+	readErrChan   chan error
+	writeErrChan  chan error
 	mutex         *sync.RWMutex
 	emitEvent     func(string, string)
 }
 
-func newAMIAdapter(ip string, port string, eventEmitter func(string, string)) (*amiAdapter, error) {
+func newAMIAdapter(ip, port, username, password string, eventEmitter func(string, string)) (*amiAdapter, error) {
 	var a = new(amiAdapter)
 	a.ip = ip
 	a.port = port
+	a.username = username
+	a.password = password
 	a.mutex = &sync.RWMutex{}
 	a.emitEvent = eventEmitter
 
@@ -39,24 +47,15 @@ func newAMIAdapter(ip string, port string, eventEmitter func(string, string)) (*
 		return nil, err
 	}
 
-	a.conn = conn
-	a.chanActions = make(chan map[string]string)
-
-	chanOutStreamReader, chanErrStreamReader := a.streamReader()
-	a.chanErr = chanErrStreamReader
-	chanQuitActionWriter := a.actionWriter()
-	a.chanResponses, a.chanEvents = classifier(chanOutStreamReader)
+	a.actionsChan = make(chan map[string]string)
+	a.responseChans = make(map[string]chan map[string]string)
+	a.EventsChan = make(chan map[string]string)
 
 	go func() {
 		for {
-			err := <-chanErrStreamReader
-			chanQuitActionWriter <- true
-			a.mutex.Lock()
-			a.connected = false
-			a.mutex.Unlock()
-
-			go a.emitEvent("error", fmt.Sprintf("AMI TCP ERROR: %s", err.Error()))
-			conn.Close()
+			a.readErrChan = make(chan error)
+			a.writeErrChan = make(chan error)
+			chanStopActionWriter := make(chan struct{})
 
 			for {
 				time.Sleep(time.Second * 1)
@@ -66,131 +65,136 @@ func newAMIAdapter(ip string, port string, eventEmitter func(string, string)) (*
 					go a.emitEvent("error", "AMI Reconnect failed")
 				} else {
 					a.conn = conn
-					chanOutStreamReader, chanErrStreamReader = a.streamReader()
-					a.chanErr = chanErrStreamReader
-					chanQuitActionWriter = a.actionWriter()
+					go a.streamReader()
+					go a.actionWriter(chanStopActionWriter)
 
-					_, err = a.Login(a.username, a.password)
+					err = a.login()
 					if err != nil {
 						go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
+						continue
 					}
 					break
 				}
 			}
+
+			select {
+			case err = <-a.readErrChan:
+			case err = <-a.writeErrChan:
+			}
+
+			chanStopActionWriter <- struct{}{}
+			a.mutex.Lock()
+			a.connected = false
+			a.mutex.Unlock()
+
+			go a.emitEvent("error", fmt.Sprintf("AMI TCP ERROR: %s", err.Error()))
+			conn.Close()
 		}
 	}()
 
 	return a, nil
 }
 
-func (a *amiAdapter) Connected() bool {
-	return a.connected
+func (a *amiAdapter) actionWriter(stop chan struct{}) {
+	for {
+		select {
+		case <-stop:
+			return
+		case action := <-a.actionsChan:
+			var data = serialize(action)
+			_, err := a.conn.Write(data)
+			if err != nil {
+				a.writeErrChan <- err
+				return
+			}
+		}
+	}
 }
 
-func (a *amiAdapter) Login(username string, password string) (chan map[string]string, error) {
-	a.username = username
-	a.password = password
+func (a *amiAdapter) distribute(event map[string]string) {
+	if _, ok := event["Event"]; ok {
+		a.EventsChan <- event
+		return
+	}
 
+	if actionID := event["ActionID"]; actionID != "" {
+		a.mutex.RLock()
+		resChan := a.responseChans[actionID]
+		a.mutex.RUnlock()
+		if resChan != nil {
+			a.mutex.Lock()
+			resChan = a.responseChans[actionID]
+			if resChan == nil {
+				a.mutex.Unlock()
+				return
+			}
+			delete(a.responseChans, actionID)
+			a.mutex.Unlock()
+			resChan <- event
+		}
+	}
+}
+
+func (a *amiAdapter) exec(action map[string]string) map[string]string {
+	actionID := action["ActionID"]
+	if actionID == "" {
+		actionID = uuid.NewV4()
+		action["ActionID"] = actionID
+	}
+
+	// TODO: parse multi-message response
+	resChan := make(chan map[string]string)
+	a.mutex.Lock()
+	a.responseChans[actionID] = resChan
+	a.mutex.Unlock()
+
+	a.actionsChan <- action
+
+	time.AfterFunc(actionTimeout, func() {
+		a.mutex.RLock()
+		_, ok := a.responseChans[actionID]
+		a.mutex.RUnlock()
+		if ok {
+			a.mutex.Lock()
+			if a.responseChans[actionID] != nil {
+				ch := a.responseChans[actionID]
+				delete(a.responseChans, actionID)
+				a.mutex.Unlock()
+				ch <- map[string]string{"Error": "Timeout"}
+				return
+			}
+			a.mutex.Unlock()
+		}
+	})
+
+	response := <-resChan
+
+	return response
+}
+
+func (a *amiAdapter) login() error {
 	var action = map[string]string{
 		"Action":   "Login",
 		"Username": a.username,
 		"Secret":   a.password,
 	}
 
-	var result = a.Exec(action)
-
+	var result = a.exec(action)
 	if result["Response"] != "Success" {
-		return nil, errors.New("Login failed: " + result["Message"])
+		return errors.New("Login failed: " + result["Message"])
 	}
+
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.connected = true
 
-	return a.chanEvents, nil
+	return nil
 }
 
-func (a *amiAdapter) Exec(action map[string]string) map[string]string {
-	a.chanActions <- action
-	var response = <-a.chanResponses
-	return response
-}
-
-func (a *amiAdapter) streamReader() (chanOut chan map[string]string, chanErr chan error) {
-	chanOut = make(chan map[string]string)
-	chanErr = make(chan error)
-
-	bufReader := bufio.NewReader(a.conn)
-	greetings := make([]byte, 100)
-	n, err := bufReader.Read(greetings)
-	if err != nil {
-		chanErr <- err
-		return
-	}
-	if n > 2 {
-		greetings = greetings[:n-2]
-	}
-	go a.emitEvent("connect", fmt.Sprintf("Connected to %s %s:%s", greetings, a.ip, a.port))
-
-	go func() {
-		var b map[string]string
-		for {
-			b, err = readMessage(bufReader)
-			if err != nil {
-				chanErr <- err
-				return
-			}
-			chanOut <- b
-		}
-	}()
-
-	return chanOut, chanErr
-}
-
-func (a *amiAdapter) actionWriter() (chanQuit chan bool) {
-	chanQuit = make(chan bool)
-
-	go func() {
-		for {
-			select {
-			case action := <-a.chanActions:
-				{
-					var data = serialize(action)
-					_, err := a.conn.Write(data)
-					if err != nil {
-						a.chanErr <- err
-					}
-				}
-			case <-chanQuit:
-				{
-					return
-				}
-			}
-		}
-	}()
-
-	return chanQuit
-}
-
-func classifier(in chan map[string]string) (chanOutResponses chan map[string]string, chanOutEvents chan map[string]string) {
-	chanOutResponses = make(chan map[string]string)
-	chanOutEvents = make(chan map[string]string)
-
-	go func() {
-		for {
-			data := <-in
-
-			if _, ok := data["Event"]; ok {
-				chanOutEvents <- data
-				continue
-			}
-
-			if _, ok := data["Response"]; ok {
-				chanOutResponses <- data
-			}
-		}
-	}()
-
-	return chanOutResponses, chanOutEvents
+func (a *amiAdapter) online() bool {
+	a.mutex.RLock()
+	defer a.mutex.RUnlock()
+	return a.connected
 }
 
 func (a *amiAdapter) openConnection() (*net.TCPConn, error) {
@@ -230,9 +234,6 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 	for {
 		kv, _, err := r.ReadLine()
 		if len(kv) == 0 {
-			if err == io.EOF && len(m) == 0 {
-				err = nil
-			}
 			return m, err
 		}
 
@@ -247,6 +248,10 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 		}
 
 		if key == "" && !responseFollows {
+			if err != nil {
+				return m, err
+			}
+
 			continue
 		}
 
@@ -261,8 +266,7 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 			continue
 		}
 
-		// Skip initial spaces in value.
-		i++ // skip colon
+		i++
 		for i < len(kv) && (kv[i] == ' ' || kv[i] == '\t') {
 			i++
 		}
@@ -277,5 +281,29 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 		if err != nil {
 			return m, err
 		}
+	}
+}
+
+func (a *amiAdapter) streamReader() {
+	greetings := make([]byte, 100)
+	n, err := a.conn.Read(greetings)
+	if err != nil {
+		a.readErrChan <- err
+		return
+	}
+	if n > 2 {
+		greetings = greetings[:n-2]
+	}
+	go a.emitEvent("connect", fmt.Sprintf("Connected to %s %s:%s", greetings, a.ip, a.port))
+
+	bufReader := bufio.NewReader(a.conn)
+	var event map[string]string
+	for {
+		event, err = readMessage(bufReader)
+		if err != nil {
+			a.readErrChan <- err
+			return
+		}
+		a.distribute(event)
 	}
 }
