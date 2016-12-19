@@ -12,6 +12,10 @@ import (
 
 var (
 	version = "0.1.1"
+
+	// TODO: implement function to clear old data in handlers.
+	agiCommandsHandlers = make(map[string]agiCommand)
+	agiCommandsMutex    = &sync.Mutex{}
 )
 
 type handlerFunc func(map[string]string)
@@ -24,7 +28,6 @@ type Amigo struct {
 	username        string
 	secret          string
 	ami             *amiAdapter
-	events          chan map[string]string
 	defaultChannel  chan map[string]string
 	defaultHandler  handlerFunc
 	handlers        map[string]handlerFunc
@@ -34,37 +37,38 @@ type Amigo struct {
 	handlerMutex    *sync.RWMutex
 }
 
+// Settings represents connection settings for Amigo.
+// Default:
+// Username = admin,
+// Password = amp111,
+// Host = 127.0.0.1,
+// Port = 5038,
+// ActionTimeout = 3s
+type Settings struct {
+	Username      string
+	Password      string
+	Host          string
+	Port          string
+	ActionTimeout time.Duration
+}
+
 type agiCommand struct {
 	c        chan map[string]string
 	dateTime time.Time
 }
 
-// TODO: implement function to clear old data in handlers.
-var (
-	agiCommandsHandlers = make(map[string]agiCommand)
-	agiCommandsMutex    = &sync.Mutex{}
-)
-
 // New creates new Amigo struct with credentials provided and returns pointer to it
 // Usage: New(username string, secret string, [host string, [port string]])
-func New(username, secret string, params ...string) *Amigo {
+func New(settings *Settings) *Amigo {
+	prepareSettings(settings)
+
 	var ami *amiAdapter
-	var events chan map[string]string
-	var host = "127.0.0.1"
-	var port = "5038"
-	if len(params) > 0 {
-		host = params[0]
-		if len(params) > 1 {
-			port = params[1]
-		}
-	}
 	return &Amigo{
-		host:          host,
-		port:          port,
-		username:      username,
-		secret:        secret,
+		host:          settings.Host,
+		port:          settings.Port,
+		username:      settings.Username,
+		secret:        settings.Password,
 		ami:           ami,
-		events:        events,
 		handlers:      map[string]handlerFunc{},
 		eventHandlers: map[string][]eventHandlerFunc{},
 		mutex:         &sync.RWMutex{},
@@ -292,5 +296,23 @@ func (a *Amigo) emitEvent(name, message string) {
 
 	for _, h := range handlers {
 		h(message)
+	}
+}
+
+func prepareSettings(settings *Settings) {
+	if settings.Username == "" {
+		settings.Username = "admin"
+	}
+	if settings.Password == "" {
+		settings.Password = "amp111"
+	}
+	if settings.Host == "" {
+		settings.Host = "127.0.0.1"
+	}
+	if settings.Port == "" {
+		settings.Port = "5038"
+	}
+	if settings.ActionTimeout == 0 {
+		settings.ActionTimeout = time.Second * 3
 	}
 }

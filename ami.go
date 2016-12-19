@@ -42,17 +42,14 @@ func newAMIAdapter(ip, port, username, password string, eventEmitter func(string
 	a.mutex = &sync.RWMutex{}
 	a.emitEvent = eventEmitter
 
-	conn, err := a.openConnection()
-	if err != nil {
-		return nil, err
-	}
-
 	a.actionsChan = make(chan map[string]string)
 	a.responseChans = make(map[string]chan map[string]string)
 	a.EventsChan = make(chan map[string]string)
 
 	go func() {
 		for {
+			var err error
+
 			a.readErrChan = make(chan error)
 			a.writeErrChan = make(chan error)
 			chanStopActionWriter := make(chan struct{})
@@ -60,11 +57,10 @@ func newAMIAdapter(ip, port, username, password string, eventEmitter func(string
 			for {
 				time.Sleep(time.Second * 1)
 
-				conn, err = a.openConnection()
+				err = a.openConnection()
 				if err != nil {
 					go a.emitEvent("error", "AMI Reconnect failed")
 				} else {
-					a.conn = conn
 					go a.streamReader()
 					go a.actionWriter(chanStopActionWriter)
 
@@ -88,7 +84,7 @@ func newAMIAdapter(ip, port, username, password string, eventEmitter func(string
 			a.mutex.Unlock()
 
 			go a.emitEvent("error", fmt.Sprintf("AMI TCP ERROR: %s", err.Error()))
-			conn.Close()
+			a.conn.Close()
 		}
 	}()
 
@@ -197,20 +193,20 @@ func (a *amiAdapter) online() bool {
 	return a.connected
 }
 
-func (a *amiAdapter) openConnection() (*net.TCPConn, error) {
+func (a *amiAdapter) openConnection() error {
 	socket := a.ip + ":" + a.port
 
 	raddr, err := net.ResolveTCPAddr("tcp", socket)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	conn, err := net.DialTCP("tcp", nil, raddr)
+	a.conn, err = net.DialTCP("tcp", nil, raddr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return conn, err
+	return nil
 }
 
 func serialize(data map[string]string) []byte {
