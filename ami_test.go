@@ -51,6 +51,33 @@ No such command 'core show hi' (type 'core show help core show hi' for other pos
 		},
 		io.EOF,
 	},
+	{
+		`Response: Follows
+Privilege: Command
+No such command 'core show hi' (type 'core show help core show hi' for other possible commands)
+--END COMMAND--
+`,
+		map[string]string{
+			"Response":  "Follows",
+			"Privilege": "Command",
+			"Extra":     "No such command 'core show hi' (type 'core show help core show hi' for other possible commands)",
+		},
+		io.EOF,
+	},
+	{
+		`Response: Follows
+Privilege: Command
+No such command 'core show hi'
+(type 'core show help core show hi' for other possible commands)
+--END COMMAND--
+`,
+		map[string]string{
+			"Response":  "Follows",
+			"Privilege": "Command",
+			"Extra":     "No such command 'core show hi' (type 'core show help core show hi' for other possible commands)",
+		},
+		io.EOF,
+	},
 }
 
 func TestReadMessage(t *testing.T) {

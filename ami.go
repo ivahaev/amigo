@@ -9,6 +9,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	logger "github.com/ivahaev/go-logger"
 )
 
 type amiAdapter struct {
@@ -17,7 +19,7 @@ type amiAdapter struct {
 	username string
 	password string
 
-	conn          net.Conn
+	conn          *net.TCPConn
 	connected     bool
 	chanActions   chan map[string]string
 	chanResponses chan map[string]string
@@ -133,12 +135,15 @@ func (a *amiAdapter) streamReader() (chanOut chan map[string]string, chanErr cha
 
 	go func() {
 		var b map[string]string
+		var i int
 		for {
 			b, err = readMessage(bufReader)
 			if err != nil {
 				chanErr <- err
 				return
 			}
+			i++
+			logger.Warn("Message count", i, b, err)
 			chanOut <- b
 		}
 	}()
@@ -193,10 +198,15 @@ func classifier(in chan map[string]string) (chanOutResponses chan map[string]str
 	return chanOutResponses, chanOutEvents
 }
 
-func (a *amiAdapter) openConnection() (net.Conn, error) {
+func (a *amiAdapter) openConnection() (*net.TCPConn, error) {
 	socket := a.ip + ":" + a.port
 
-	conn, err := net.DialTimeout("tcp", socket, time.Second*10)
+	raddr, err := net.ResolveTCPAddr("tcp", socket)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := net.DialTCP("tcp", nil, raddr)
 	if err != nil {
 		return nil, err
 	}
@@ -253,10 +263,14 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 		}
 		value := string(kv[i:])
 
-		if key == "Extra" && len(m[key]) > 0 {
-			value = m[key] + "\n" + value
+		if m[key] == "" {
+			m[key] = value
+		} else {
+			if value == "--END COMMAND--" {
+				continue
+			}
+			m[key] = m[key] + " " + value
 		}
-		m[key] = value
 
 		if err != nil {
 			return m, err
