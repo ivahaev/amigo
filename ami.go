@@ -197,7 +197,7 @@ func (a *amiAdapter) login() error {
 	}
 
 	var result = a.exec(action)
-	if result["Response"] != "Success" {
+	if result["Response"] != "Success" && result["Message"] != "Authentication accepted" {
 		return errors.New("Login failed: " + result["Message"])
 	}
 
