@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	version = "0.1.4"
+	version = "0.1.5"
 
 	// TODO: implement function to clear old data in handlers.
 	agiCommandsHandlers = make(map[string]agiCommand)
@@ -161,16 +161,20 @@ func (a *Amigo) Connect() {
 	go func() {
 		for {
 			var e = <-a.ami.EventsChan
-
 			a.handlerMutex.RLock()
+
+			var event = strings.ToUpper(e["Event"])
+			if len(e["Time"]) == 0 {
+				e["Time"] = time.Now().Format(time.RFC3339Nano)
+			}
 
 			if a.defaultChannel != nil {
 				go func(e map[string]string) {
 					a.defaultChannel <- e
 				}(e)
 			}
-			var event = strings.ToUpper(e["Event"])
-			if event != "" && (a.handlers[event] != nil || a.defaultHandler != nil) {
+
+			if len(event) != 0 && (a.handlers[event] != nil || a.defaultHandler != nil) {
 				if a.capitalizeProps {
 					ev := map[string]string{}
 					for k, v := range e {

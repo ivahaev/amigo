@@ -132,9 +132,10 @@ func (a *amiAdapter) actionWriter(stop chan struct{}) {
 }
 
 func (a *amiAdapter) distribute(event map[string]string) {
+	actionID := event["ActionID"]
 	a.EventsChan <- event
 
-	if actionID := event["ActionID"]; actionID != "" {
+	if actionID != "" {
 		a.mutex.RLock()
 		resChan := a.responseChans[actionID]
 		a.mutex.RUnlock()

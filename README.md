@@ -6,11 +6,12 @@ API has been changed in v0.1.2. Please read the godoc.
 
 Usage is pretty simple.
 
-To install:
+## Installation:
 
 `go get github.com/ivahaev/amigo`
 
-Then import module to your project:
+## Using
+Import module to your project:
 ```go
 import "github.com/ivahaev/amigo"
 ```
@@ -70,3 +71,7 @@ func main() {
 	}
 }
 ```
+
+## SIC!
+You should not modify received events, because it can be read in another amigo goroutine.
+If you need to modify, you should copy all values to another map and modify it.
