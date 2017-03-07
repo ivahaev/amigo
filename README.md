@@ -69,6 +69,9 @@ func main() {
 		// You need to catch them in event channel, DefaultHandler or specified HandlerFunction
 		fmt.Println(result, err)
 	}
+	
+	ch := make(chan bool)
+	<-ch
 }
 ```
 
