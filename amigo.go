@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	version = "0.1.5"
+	version = "0.1.6"
 
 	// TODO: implement function to clear old data in handlers.
 	agiCommandsHandlers = make(map[string]agiCommand)
@@ -163,38 +163,40 @@ func (a *Amigo) Connect() {
 			var e = <-a.ami.EventsChan
 			a.handlerMutex.RLock()
 
-			var event = strings.ToUpper(e["Event"])
 			if len(e["Time"]) == 0 {
 				e["Time"] = time.Now().Format(time.RFC3339Nano)
 			}
 
 			if a.defaultChannel != nil {
-				go func(e map[string]string) {
-					a.defaultChannel <- e
-				}(e)
+				a.defaultChannel <- e
 			}
 
+			var event = strings.ToUpper(e["Event"])
 			if len(event) != 0 && (a.handlers[event] != nil || a.defaultHandler != nil) {
 				if a.capitalizeProps {
 					ev := map[string]string{}
 					for k, v := range e {
 						ev[strings.ToUpper(k)] = v
 					}
+
 					if a.handlers[event] != nil {
-						go a.handlers[event](ev)
+						a.handlers[event](ev)
 					}
+
 					if a.defaultHandler != nil {
-						go a.defaultHandler(ev)
+						a.defaultHandler(ev)
 					}
 				} else {
 					if a.defaultHandler != nil {
-						go a.defaultHandler(e)
+						a.defaultHandler(e)
 					}
+
 					if a.handlers[event] != nil {
-						go a.handlers[event](e)
+						a.handlers[event](e)
 					}
 				}
 			}
+
 			if event == "ASYNCAGI" {
 				commandID, ok := e["CommandID"]
 				if !ok {
@@ -211,6 +213,7 @@ func (a *Amigo) Connect() {
 					agiCommandsMutex.Unlock()
 				}
 			}
+
 			a.handlerMutex.RUnlock()
 		}
 	}()

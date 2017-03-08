@@ -45,7 +45,7 @@ func newAMIAdapter(ip, port, username, password string, eventEmitter func(string
 
 	a.actionsChan = make(chan map[string]string)
 	a.responseChans = make(map[string]chan map[string]string)
-	a.EventsChan = make(chan map[string]string)
+	a.EventsChan = make(chan map[string]string, 1000)
 
 	go func() {
 		for {
