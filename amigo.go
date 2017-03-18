@@ -163,10 +163,6 @@ func (a *Amigo) Connect() {
 			var e = <-a.ami.EventsChan
 			a.handlerMutex.RLock()
 
-			if len(e["Time"]) == 0 {
-				e["Time"] = time.Now().Format(time.RFC3339Nano)
-			}
-
 			if a.defaultChannel != nil {
 				a.defaultChannel <- e
 			}

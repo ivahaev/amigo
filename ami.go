@@ -317,6 +317,7 @@ func (a *amiAdapter) streamReader(stop chan struct{}) {
 			}
 
 			event["#"] = strconv.Itoa(i)
+			event["Time"] = time.Now().Format(time.RFC3339Nano)
 			chanEvents <- event
 		}
 	}()
