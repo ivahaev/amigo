@@ -7,7 +7,7 @@ import (
 func TestAmigo(t *testing.T) {
 	t.Run("#New", func(t *testing.T) {
 		t.Run("should return pointer to a new Amigo struct with username and password filled and default host and port settings", func(t *testing.T) {
-			a := New("username", "secret")
+			a := New(&Settings{Username: "username", Password: "secret"})
 			if a.username != "username" {
 				t.Fatal("username mismatched")
 			}
@@ -16,7 +16,7 @@ func TestAmigo(t *testing.T) {
 			}
 		})
 		t.Run("should return pointer to a new Amigo struct with username and password filled and provided host and default port settings", func(t *testing.T) {
-			a := New("username", "secret", "amigo")
+			a := New(&Settings{Username: "username", Password: "secret", Host: "amigo"})
 			if a.username != "username" {
 				t.Fatal("username mismatched")
 			}
@@ -31,7 +31,7 @@ func TestAmigo(t *testing.T) {
 			}
 		})
 		t.Run("should return pointer to a new Amigo struct with username, password, host and port filled", func(t *testing.T) {
-			a := New("username", "secret", "amigo", "666")
+			a := New(&Settings{Username: "username", Password: "secret", Host: "amigo", Port: "666"})
 			if a.username != "username" {
 				t.Fatal("username mismatched")
 			}
