@@ -97,3 +97,14 @@ func TestReadMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestToUnicode(t *testing.T) {
+	// "Astérix" in ISO-8859-1 bytes
+	message := []byte{65, 115, 116, 233, 114, 105, 120}
+	message = toUnicode(message)
+
+	expected := "Astérix"
+	if string(message) != expected {
+		t.Fatalf("unexpected result: want %s got %s", expected, string(message))
+	}
+}

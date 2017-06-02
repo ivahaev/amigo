@@ -239,6 +239,7 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 		if len(kv) == 0 {
 			return m, err
 		}
+		kv = toUnicode(kv)
 
 		var key string
 		i := bytes.IndexByte(kv, ':')
@@ -285,6 +286,14 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 			return m, err
 		}
 	}
+}
+
+func toUnicode(bs []byte) []byte {
+	var buffer bytes.Buffer
+	for _, b := range bs {
+		buffer.WriteRune(rune(b))
+	}
+	return buffer.Bytes()
 }
 
 func serialize(data map[string]string) []byte {
