@@ -16,6 +16,7 @@ var (
 	// TODO: implement function to clear old data in handlers.
 	agiCommandsHandlers = make(map[string]agiCommand)
 	agiCommandsMutex    = &sync.Mutex{}
+	errNotConnected     = errors.New("Not connected to Asterisk")
 )
 
 type handlerFunc func(map[string]string)
@@ -84,28 +85,31 @@ func (a *Amigo) CapitalizeProps(c bool) {
 // Action used to execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
 // Usage amigo.Action(action map[string]string)
 func (a *Amigo) Action(action map[string]string) (map[string]string, error) {
-	if a.Connected() {
-		a.mutex.Lock()
-		defer a.mutex.Unlock()
-		result := a.ami.exec(action)
-		if a.capitalizeProps {
-			e := map[string]string{}
-			for k, v := range result {
-				e[strings.ToUpper(k)] = v
-			}
-			return e, nil
-		}
-		return result, nil
+	if !a.Connected() {
+		return nil, errNotConnected
 	}
-	return nil, errors.New("Not connected to Asterisk")
+
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	result := a.ami.exec(action)
+	if a.capitalizeProps {
+		e := map[string]string{}
+		for k, v := range result {
+			e[strings.ToUpper(k)] = v
+		}
+		return e, nil
+	}
+
+	return result, nil
 }
 
 // AgiAction used to execute Agi Actions in Asterisk. Returns full response.
 // Usage amigo.AgiAction(channel, command string)
 func (a *Amigo) AgiAction(channel, command string) (map[string]string, error) {
 	if !a.Connected() {
-		return nil, errors.New("Not connected to Asterisk")
+		return nil, errNotConnected
 	}
+
 	commandID := uuid.NewV4()
 	action := map[string]string{
 		"Action":    "AGI",
@@ -133,6 +137,7 @@ func (a *Amigo) AgiAction(channel, command string) (map[string]string, error) {
 			delete(result, k)
 		}
 	}
+
 	return result, nil
 }
 
