@@ -50,6 +50,10 @@ func eventsProcessor(ch <-chan map[string]string) {
 			default:
 				fmt.Printf("Unknown Dial SubEvent: %s\n", e["SubEvent"])
 			}
+		case "DialBegin":
+			dialBeginHandler(e)
+		case "DialEnd":
+			dialEndHandler(e)
 		case "Hangup":
 			hangupHandler(e)
 		}
@@ -93,15 +97,31 @@ func main() {
 
 		switch e["Event"] {
 		case "Dial":
+			{
+				if ch, ok := chans[uniqueID]; ok {
+					ch <- e
+					continue
+				}
+
+				ch := make(chan map[string]string, 3) // capacity is 3 because only 3 events will handled
+				ch <- e
+				chans[uniqueID] = ch
+				go eventsProcessor(ch)
+			}
+		case "DialBegin": // asterisk 13
+			{
+				ch := make(chan map[string]string, 3)
+				ch <- e
+				chans[uniqueID] = ch
+				go eventsProcessor(ch)
+			}
+		case "DialEnd": // asterisk 13
 			if ch, ok := chans[uniqueID]; ok {
 				ch <- e
 				continue
 			}
 
-			ch := make(chan map[string]string, 3) // capacity is 3 because only 3 events will handled
-			ch <- e
-			chans[uniqueID] = ch
-			go eventsProcessor(ch)
+			fmt.Printf("Unknown UniqueID on DialEnd event: %s\n", uniqueID)
 		case "Hangup":
 			if ch, ok := chans[uniqueID]; ok {
 				ch <- e
