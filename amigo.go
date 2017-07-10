@@ -24,16 +24,14 @@ type eventHandlerFunc func(string)
 
 // Amigo is a main package struct
 type Amigo struct {
-	host            string
-	port            string
-	username        string
-	secret          string
+	settings        *Settings
 	ami             *amiAdapter
 	defaultChannel  chan map[string]string
 	defaultHandler  handlerFunc
 	handlers        map[string]handlerFunc
 	eventHandlers   map[string][]eventHandlerFunc
 	capitalizeProps bool
+	connectCalled   bool
 	mutex           *sync.RWMutex
 	handlerMutex    *sync.RWMutex
 }
@@ -45,12 +43,14 @@ type Amigo struct {
 // Host = 127.0.0.1,
 // Port = 5038,
 // ActionTimeout = 3s
+// DialTimeout = 10s
 type Settings struct {
 	Username      string
 	Password      string
 	Host          string
 	Port          string
 	ActionTimeout time.Duration
+	DialTimeout   time.Duration
 }
 
 type agiCommand struct {
@@ -65,10 +65,7 @@ func New(settings *Settings) *Amigo {
 
 	var ami *amiAdapter
 	return &Amigo{
-		host:          settings.Host,
-		port:          settings.Port,
-		username:      settings.Username,
-		secret:        settings.Password,
+		settings:      settings,
 		ami:           ami,
 		handlers:      map[string]handlerFunc{},
 		eventHandlers: map[string][]eventHandlerFunc{},
@@ -144,9 +141,20 @@ func (a *Amigo) AgiAction(channel, command string) (map[string]string, error) {
 // Connect with Asterisk.
 // If connect fails, will try to reconnect every second.
 func (a *Amigo) Connect() {
+	var connectCalled bool
+	a.mutex.RLock()
+	connectCalled = a.connectCalled
+	a.mutex.RUnlock()
+	if connectCalled {
+		return
+	}
+
+	a.mutex.Lock()
+	a.connectCalled = true
+	a.mutex.Unlock()
 	var err error
 	for {
-		am, err := newAMIAdapter(a.host, a.port, a.username, a.secret, a.emitEvent)
+		am, err := newAMIAdapter(a.settings, a.emitEvent)
 		if err != nil {
 			go a.emitEvent("error", fmt.Sprintf("AMI Connect error: %s", err.Error()))
 		} else {
@@ -230,6 +238,9 @@ func (a *Amigo) Connected() bool {
 // On register handler for package events. Now amigo will emit two types of events:
 // "connect" fired on connection success and "error" on any error occured.
 func (a *Amigo) On(event string, handler func(string)) {
+	a.handlerMutex.Lock()
+	defer a.handlerMutex.Unlock()
+
 	if _, ok := a.eventHandlers[event]; !ok {
 		a.eventHandlers[event] = []eventHandlerFunc{}
 	}
@@ -240,6 +251,7 @@ func (a *Amigo) On(event string, handler func(string)) {
 func (a *Amigo) RegisterDefaultHandler(f handlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
+
 	if a.defaultHandler != nil {
 		return errors.New("DefaultHandler already registered")
 	}
@@ -321,6 +333,9 @@ func prepareSettings(settings *Settings) {
 		settings.Port = "5038"
 	}
 	if settings.ActionTimeout == 0 {
-		settings.ActionTimeout = time.Second * 3
+		settings.ActionTimeout = actionTimeout
+	}
+	if settings.DialTimeout == 0 {
+		settings.DialTimeout = dialTimeout
 	}
 }

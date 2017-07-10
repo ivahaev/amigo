@@ -13,33 +13,36 @@ import (
 	"github.com/ivahaev/amigo/uuid"
 )
 
-var actionTimeout = time.Second * 3
+var (
+	actionTimeout = 3 * time.Second
+	dialTimeout   = 10 * time.Second
+)
 
 type amiAdapter struct {
 	EventsChan chan map[string]string
 
-	ip       string
-	port     string
-	username string
-	password string
+	dialString string
+	username   string
+	password   string
 
-	conn      *net.TCPConn
-	connected bool
+	conn          net.Conn
+	connected     bool
+	actionTimeout time.Duration
+	dialTimeout   time.Duration
 
 	actionsChan   chan map[string]string
 	responseChans map[string]chan map[string]string
-	readErrChan   chan error
-	writeErrChan  chan error
 	mutex         *sync.RWMutex
 	emitEvent     func(string, string)
 }
 
-func newAMIAdapter(ip, port, username, password string, eventEmitter func(string, string)) (*amiAdapter, error) {
+func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter, error) {
 	var a = new(amiAdapter)
-	a.ip = ip
-	a.port = port
-	a.username = username
-	a.password = password
+	a.dialString = fmt.Sprintf("%s:%s", s.Host, s.Port)
+	a.username = s.Username
+	a.password = s.Password
+	a.actionTimeout = s.ActionTimeout
+	a.dialTimeout = s.DialTimeout
 	a.mutex = &sync.RWMutex{}
 	a.emitEvent = eventEmitter
 
@@ -50,29 +53,28 @@ func newAMIAdapter(ip, port, username, password string, eventEmitter func(string
 	go func() {
 		for {
 			var err error
-
-			a.readErrChan = make(chan error)
-			a.writeErrChan = make(chan error)
+			readErrChan := make(chan error)
+			writeErrChan := make(chan error)
 			chanStop := make(chan struct{})
-
 			for {
-				time.Sleep(time.Second * 1)
-
-				err = a.openConnection()
+				conn, err := a.openConnection()
 				if err == nil {
-					go a.streamReader(chanStop)
-					go a.actionWriter(chanStop)
+					a.conn = conn
+					go a.streamReader(chanStop, readErrChan)
+					go a.actionWriter(chanStop, writeErrChan)
 
 					greetings := make([]byte, 100)
 					n, err := a.conn.Read(greetings)
 					if err != nil {
 						go a.emitEvent("error", fmt.Sprintf("Asterisk connection error: %s", err.Error()))
+						a.conn.Close()
 						continue
 					}
 
 					err = a.login()
 					if err != nil {
 						go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
+						a.conn.Close()
 						continue
 					}
 
@@ -85,6 +87,7 @@ func newAMIAdapter(ip, port, username, password string, eventEmitter func(string
 				}
 
 				a.emitEvent("error", "AMI Reconnect failed")
+				time.Sleep(time.Second * 1)
 			}
 
 			a.mutex.Lock()
@@ -92,8 +95,8 @@ func newAMIAdapter(ip, port, username, password string, eventEmitter func(string
 			a.mutex.Unlock()
 
 			select {
-			case err = <-a.readErrChan:
-			case err = <-a.writeErrChan:
+			case err = <-readErrChan:
+			case err = <-writeErrChan:
 			}
 
 			close(chanStop)
@@ -109,7 +112,7 @@ func newAMIAdapter(ip, port, username, password string, eventEmitter func(string
 	return a, nil
 }
 
-func (a *amiAdapter) actionWriter(stop chan struct{}) {
+func (a *amiAdapter) actionWriter(stop chan struct{}, writeErrChan chan error) {
 	for {
 		select {
 		case <-stop:
@@ -124,7 +127,7 @@ func (a *amiAdapter) actionWriter(stop chan struct{}) {
 			var data = serialize(action)
 			_, err := a.conn.Write(data)
 			if err != nil {
-				a.writeErrChan <- err
+				writeErrChan <- err
 				return
 			}
 		}
@@ -168,14 +171,13 @@ func (a *amiAdapter) exec(action map[string]string) map[string]string {
 
 	a.actionsChan <- action
 
-	time.AfterFunc(actionTimeout, func() {
+	time.AfterFunc(a.actionTimeout, func() {
 		a.mutex.RLock()
 		_, ok := a.responseChans[actionID]
 		a.mutex.RUnlock()
 		if ok {
 			a.mutex.Lock()
-			if a.responseChans[actionID] != nil {
-				ch := a.responseChans[actionID]
+			if ch, ok := a.responseChans[actionID]; ok {
 				delete(a.responseChans, actionID)
 				a.mutex.Unlock()
 				ch <- map[string]string{"Error": "Timeout"}
@@ -215,20 +217,8 @@ func (a *amiAdapter) online() bool {
 	return a.connected
 }
 
-func (a *amiAdapter) openConnection() error {
-	socket := a.ip + ":" + a.port
-
-	raddr, err := net.ResolveTCPAddr("tcp", socket)
-	if err != nil {
-		return err
-	}
-
-	a.conn, err = net.DialTCP("tcp", nil, raddr)
-	if err != nil {
-		return err
-	}
-
-	return nil
+func (a *amiAdapter) openConnection() (net.Conn, error) {
+	return net.DialTimeout("tcp", a.dialString, a.dialTimeout)
 }
 
 func readMessage(r *bufio.Reader) (m map[string]string, err error) {
@@ -260,8 +250,13 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 
 		if responseFollows && key != "Privilege" {
 			if string(kv) != "--END COMMAND--" {
-				m["CommandResponse"] = fmt.Sprintf("%s\n%s", m["CommandResponse"], string(kv))
+				if len(m["CommandResponse"]) == 0 {
+					m["CommandResponse"] = string(kv)
+				} else {
+					m["CommandResponse"] = fmt.Sprintf("%s\n%s", m["CommandResponse"], string(kv))
+				}
 			}
+
 			if err != nil {
 				return m, err
 			}
@@ -301,7 +296,7 @@ func serialize(data map[string]string) []byte {
 	return outBuf.Bytes()
 }
 
-func (a *amiAdapter) streamReader(stop chan struct{}) {
+func (a *amiAdapter) streamReader(stop chan struct{}, readErrChan chan error) {
 	chanErr := make(chan error)
 	chanEvents := make(chan map[string]string)
 
@@ -333,7 +328,7 @@ func (a *amiAdapter) streamReader(stop chan struct{}) {
 		case <-stop:
 			return
 		case err := <-chanErr:
-			a.readErrChan <- err
+			readErrChan <- err
 		case event := <-chanEvents:
 			a.distribute(event)
 		}

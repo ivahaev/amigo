@@ -24,6 +24,7 @@ OutboundAuths             :                looong untrimed value
 Contacts: XXXX/sip:XXXX
 DeviceState: Unavailable
 ActiveChannels:
+
 `,
 		map[string]string{
 			"Event":          "EndpointList",
@@ -37,32 +38,34 @@ ActiveChannels:
 			"DeviceState":    "Unavailable",
 			"ActiveChannels": "",
 		},
-		io.EOF,
+		nil,
 	},
 	{
 		`Response: Follows
 Privilege: Command
 No such command 'core show hi' (type 'core show help core show hi' for other possible commands)
+
 `,
 		map[string]string{
 			"Response":        "Follows",
 			"Privilege":       "Command",
-			"CommandResponse": "\nNo such command 'core show hi' (type 'core show help core show hi' for other possible commands)",
+			"CommandResponse": "No such command 'core show hi' (type 'core show help core show hi' for other possible commands)",
 		},
-		io.EOF,
+		nil,
 	},
 	{
 		`Response: Follows
 Privilege: Command
 No such command 'core show hi' (type 'core show help core show hi' for other possible commands)
 --END COMMAND--
+
 `,
 		map[string]string{
 			"Response":        "Follows",
 			"Privilege":       "Command",
-			"CommandResponse": "\nNo such command 'core show hi' (type 'core show help core show hi' for other possible commands)",
+			"CommandResponse": "No such command 'core show hi' (type 'core show help core show hi' for other possible commands)",
 		},
-		io.EOF,
+		nil,
 	},
 	{
 		`Response: Follows
@@ -74,7 +77,7 @@ No such command 'core show hi'
 		map[string]string{
 			"Response":        "Follows",
 			"Privilege":       "Command",
-			"CommandResponse": "\nNo such command 'core show hi'\n(type 'core show help core show hi' for other possible commands)",
+			"CommandResponse": "No such command 'core show hi'\n(type 'core show help core show hi' for other possible commands)",
 		},
 		io.EOF,
 	},
