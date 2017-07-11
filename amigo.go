@@ -51,6 +51,7 @@ type Settings struct {
 	Port          string
 	ActionTimeout time.Duration
 	DialTimeout   time.Duration
+	Keepalive     bool
 }
 
 type agiCommand struct {
@@ -173,7 +174,7 @@ func (a *Amigo) Connect() {
 
 	go func() {
 		for {
-			var e = <-a.ami.EventsChan
+			var e = <-a.ami.eventsChan
 			a.handlerMutex.RLock()
 
 			if a.defaultChannel != nil {

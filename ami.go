@@ -8,18 +8,27 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ivahaev/amigo/uuid"
 )
 
+const (
+	pingActionID   = "AmigoPing"
+	amigoConnIdKey = "AmigoConnID"
+)
+
 var (
 	actionTimeout = 3 * time.Second
 	dialTimeout   = 10 * time.Second
+	pingInterval  = 5 * time.Second
+	sequence      uint64
 )
 
 type amiAdapter struct {
-	EventsChan chan map[string]string
+	id         string
+	eventsChan chan map[string]string
 
 	dialString string
 	username   string
@@ -32,6 +41,7 @@ type amiAdapter struct {
 
 	actionsChan   chan map[string]string
 	responseChans map[string]chan map[string]string
+	pingerChan    chan struct{}
 	mutex         *sync.RWMutex
 	emitEvent     func(string, string)
 }
@@ -48,13 +58,16 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 
 	a.actionsChan = make(chan map[string]string)
 	a.responseChans = make(map[string]chan map[string]string)
-	a.EventsChan = make(chan map[string]string, 1000)
+	a.eventsChan = make(chan map[string]string, 1000)
+	a.pingerChan = make(chan struct{})
 
 	go func() {
 		for {
+			a.id = nextID()
 			var err error
 			readErrChan := make(chan error)
 			writeErrChan := make(chan error)
+			pingErrChan := make(chan error)
 			chanStop := make(chan struct{})
 			for {
 				conn, err := a.openConnection()
@@ -80,8 +93,11 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 					}
 
 					go a.emitEvent("connect", string(greetings))
-					go a.streamReader(chanStop, readErrChan)
-					go a.actionWriter(chanStop, writeErrChan)
+					go a.reader(chanStop, readErrChan)
+					go a.writer(chanStop, writeErrChan)
+					if s.Keepalive {
+						go a.pinger(chanStop, pingErrChan)
+					}
 					break
 				}
 
@@ -96,6 +112,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 			select {
 			case err = <-readErrChan:
 			case err = <-writeErrChan:
+			case err = <-pingErrChan:
 			}
 
 			close(chanStop)
@@ -111,7 +128,48 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 	return a, nil
 }
 
-func (a *amiAdapter) actionWriter(stop chan struct{}, writeErrChan chan error) {
+func nextID() string {
+	i := atomic.AddUint64(&sequence, 1)
+	return strconv.Itoa(int(i))
+}
+
+func (a *amiAdapter) pinger(stop <-chan struct{}, errChan chan error) {
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+	ping := map[string]string{"Action": "Ping", "ActionID": pingActionID}
+	ping[amigoConnIdKey] = a.id
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+		}
+
+		if !a.online() {
+			// when stop chan didn't received before ticker
+			return
+		}
+
+		a.actionsChan <- ping
+		timer := time.NewTimer(3 * time.Second)
+		select {
+		case <-a.pingerChan:
+			timer.Stop()
+			continue
+		case <-timer.C:
+			errChan <- errors.New("ping timeout")
+			return
+		}
+	}
+}
+
+func (a *amiAdapter) writer(stop <-chan struct{}, writeErrChan chan error) {
 	for {
 		select {
 		case <-stop:
@@ -123,7 +181,11 @@ func (a *amiAdapter) actionWriter(stop chan struct{}, writeErrChan chan error) {
 		case <-stop:
 			return
 		case action := <-a.actionsChan:
-			var data = serialize(action)
+			if action[amigoConnIdKey] != a.id {
+				// action sent before reconnect, need to be ignored
+				continue
+			}
+			data := serialize(action)
 			_, err := a.conn.Write(data)
 			if err != nil {
 				writeErrChan <- err
@@ -135,9 +197,15 @@ func (a *amiAdapter) actionWriter(stop chan struct{}, writeErrChan chan error) {
 
 func (a *amiAdapter) distribute(event map[string]string) {
 	actionID := event["ActionID"]
-	a.EventsChan <- event
+	if actionID == pingActionID {
+		a.pingerChan <- struct{}{}
+		return
+	}
 
-	if actionID != "" {
+	// TODO: Need to decide to send or not to send action responses to eventsChan
+	a.eventsChan <- event
+	if len(actionID) > 0 {
+
 		a.mutex.RLock()
 		resChan := a.responseChans[actionID]
 		a.mutex.RUnlock()
@@ -153,9 +221,11 @@ func (a *amiAdapter) distribute(event map[string]string) {
 			resChan <- event
 		}
 	}
+
 }
 
 func (a *amiAdapter) exec(action map[string]string) map[string]string {
+	action[amigoConnIdKey] = a.id
 	actionID := action["ActionID"]
 	if actionID == "" {
 		actionID = uuid.NewV4()
@@ -306,7 +376,7 @@ func serialize(data map[string]string) []byte {
 	return outBuf.Bytes()
 }
 
-func (a *amiAdapter) streamReader(stop chan struct{}, readErrChan chan error) {
+func (a *amiAdapter) reader(stop <-chan struct{}, readErrChan chan error) {
 	chanErr := make(chan error)
 	chanEvents := make(chan map[string]string)
 
