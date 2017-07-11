@@ -60,9 +60,6 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 				conn, err := a.openConnection()
 				if err == nil {
 					a.conn = conn
-					go a.streamReader(chanStop, readErrChan)
-					go a.actionWriter(chanStop, writeErrChan)
-
 					greetings := make([]byte, 100)
 					n, err := a.conn.Read(greetings)
 					if err != nil {
@@ -81,8 +78,10 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 					if n > 2 {
 						greetings = greetings[:n-2]
 					}
-					go a.emitEvent("connect", string(greetings))
 
+					go a.emitEvent("connect", string(greetings))
+					go a.streamReader(chanStop, readErrChan)
+					go a.actionWriter(chanStop, writeErrChan)
 					break
 				}
 
@@ -199,9 +198,20 @@ func (a *amiAdapter) login() error {
 		"Secret":   a.password,
 	}
 
-	var result = a.exec(action)
+	serialized := serialize(action)
+	_, err := a.conn.Write(serialized)
+	if err != nil {
+		return err
+	}
+
+	reader := bufio.NewReader(a.conn)
+	result, err := readMessage(reader)
+	if err != nil {
+		return err
+	}
+
 	if result["Response"] != "Success" && result["Message"] != "Authentication accepted" {
-		return errors.New("Login failed: " + result["Message"])
+		return errors.New(result["Message"])
 	}
 
 	a.mutex.Lock()
