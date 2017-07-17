@@ -16,7 +16,7 @@ import (
 
 const (
 	pingActionID   = "AmigoPing"
-	amigoConnIdKey = "AmigoConnID"
+	amigoConnIDKey = "AmigoConnID"
 )
 
 var (
@@ -34,7 +34,6 @@ type amiAdapter struct {
 	username   string
 	password   string
 
-	conn          net.Conn
 	connected     bool
 	actionTimeout time.Duration
 	dialTimeout   time.Duration
@@ -63,65 +62,65 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 
 	go func() {
 		for {
-			a.id = nextID()
-			var err error
-			readErrChan := make(chan error)
-			writeErrChan := make(chan error)
-			pingErrChan := make(chan error)
-			chanStop := make(chan struct{})
-			for {
-				conn, err := a.openConnection()
-				if err == nil {
-					a.conn = conn
-					greetings := make([]byte, 100)
-					n, err := a.conn.Read(greetings)
-					if err != nil {
-						go a.emitEvent("error", fmt.Sprintf("Asterisk connection error: %s", err.Error()))
-						a.conn.Close()
-						continue
+			func() {
+				a.id = nextID()
+				var err error
+				var conn net.Conn
+				readErrChan := make(chan error)
+				writeErrChan := make(chan error)
+				pingErrChan := make(chan error)
+				chanStop := make(chan struct{})
+				for {
+					conn, err = a.openConnection()
+					if err == nil {
+						defer conn.Close()
+						greetings := make([]byte, 100)
+						n, err := conn.Read(greetings)
+						if err != nil {
+							go a.emitEvent("error", fmt.Sprintf("Asterisk connection error: %s", err.Error()))
+							return
+						}
+
+						err = a.login(conn)
+						if err != nil {
+							go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
+							return
+						}
+
+						if n > 2 {
+							greetings = greetings[:n-2]
+						}
+
+						go a.emitEvent("connect", string(greetings))
+						break
 					}
 
-					err = a.login()
-					if err != nil {
-						go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
-						a.conn.Close()
-						continue
-					}
-
-					if n > 2 {
-						greetings = greetings[:n-2]
-					}
-
-					go a.emitEvent("connect", string(greetings))
-					go a.reader(chanStop, readErrChan)
-					go a.writer(chanStop, writeErrChan)
-					if s.Keepalive {
-						go a.pinger(chanStop, pingErrChan)
-					}
-					break
+					a.emitEvent("error", "AMI Reconnect failed")
+					time.Sleep(time.Second * 1)
 				}
 
-				a.emitEvent("error", "AMI Reconnect failed")
-				time.Sleep(time.Second * 1)
-			}
+				a.mutex.Lock()
+				a.connected = true
+				a.mutex.Unlock()
+				go a.reader(conn, chanStop, readErrChan)
+				go a.writer(conn, chanStop, writeErrChan)
+				if s.Keepalive {
+					go a.pinger(chanStop, pingErrChan)
+				}
 
-			a.mutex.Lock()
-			a.connected = true
-			a.mutex.Unlock()
+				select {
+				case err = <-readErrChan:
+				case err = <-writeErrChan:
+				case err = <-pingErrChan:
+				}
 
-			select {
-			case err = <-readErrChan:
-			case err = <-writeErrChan:
-			case err = <-pingErrChan:
-			}
+				close(chanStop)
+				a.mutex.Lock()
+				a.connected = false
+				a.mutex.Unlock()
 
-			close(chanStop)
-			a.mutex.Lock()
-			a.connected = false
-			a.mutex.Unlock()
-
-			go a.emitEvent("error", fmt.Sprintf("AMI TCP ERROR: %s", err.Error()))
-			a.conn.Close()
+				go a.emitEvent("error", fmt.Sprintf("AMI TCP ERROR: %s", err.Error()))
+			}()
 		}
 	}()
 
@@ -136,8 +135,7 @@ func nextID() string {
 func (a *amiAdapter) pinger(stop <-chan struct{}, errChan chan error) {
 	ticker := time.NewTicker(pingInterval)
 	defer ticker.Stop()
-	ping := map[string]string{"Action": "Ping", "ActionID": pingActionID}
-	ping[amigoConnIdKey] = a.id
+	ping := map[string]string{"Action": "Ping", "ActionID": pingActionID, amigoConnIDKey: a.id}
 	for {
 		select {
 		case <-stop:
@@ -169,7 +167,7 @@ func (a *amiAdapter) pinger(stop <-chan struct{}, errChan chan error) {
 	}
 }
 
-func (a *amiAdapter) writer(stop <-chan struct{}, writeErrChan chan error) {
+func (a *amiAdapter) writer(conn net.Conn, stop <-chan struct{}, writeErrChan chan error) {
 	for {
 		select {
 		case <-stop:
@@ -181,12 +179,12 @@ func (a *amiAdapter) writer(stop <-chan struct{}, writeErrChan chan error) {
 		case <-stop:
 			return
 		case action := <-a.actionsChan:
-			if action[amigoConnIdKey] != a.id {
+			if action[amigoConnIDKey] != a.id {
 				// action sent before reconnect, need to be ignored
 				continue
 			}
 			data := serialize(action)
-			_, err := a.conn.Write(data)
+			_, err := conn.Write(data)
 			if err != nil {
 				writeErrChan <- err
 				return
@@ -225,7 +223,7 @@ func (a *amiAdapter) distribute(event map[string]string) {
 }
 
 func (a *amiAdapter) exec(action map[string]string) map[string]string {
-	action[amigoConnIdKey] = a.id
+	action[amigoConnIDKey] = a.id
 	actionID := action["ActionID"]
 	if actionID == "" {
 		actionID = uuid.NewV4()
@@ -261,7 +259,7 @@ func (a *amiAdapter) exec(action map[string]string) map[string]string {
 	return response
 }
 
-func (a *amiAdapter) login() error {
+func (a *amiAdapter) login(conn net.Conn) error {
 	var action = map[string]string{
 		"Action":   "Login",
 		"Username": a.username,
@@ -269,12 +267,12 @@ func (a *amiAdapter) login() error {
 	}
 
 	serialized := serialize(action)
-	_, err := a.conn.Write(serialized)
+	_, err := conn.Write(serialized)
 	if err != nil {
 		return err
 	}
 
-	reader := bufio.NewReader(a.conn)
+	reader := bufio.NewReader(conn)
 	result, err := readMessage(reader)
 	if err != nil {
 		return err
@@ -283,10 +281,6 @@ func (a *amiAdapter) login() error {
 	if result["Response"] != "Success" && result["Message"] != "Authentication accepted" {
 		return errors.New(result["Message"])
 	}
-
-	a.mutex.Lock()
-	defer a.mutex.Unlock()
-	a.connected = true
 
 	return nil
 }
@@ -376,12 +370,11 @@ func serialize(data map[string]string) []byte {
 	return outBuf.Bytes()
 }
 
-func (a *amiAdapter) reader(stop <-chan struct{}, readErrChan chan error) {
+func (a *amiAdapter) reader(conn net.Conn, stop <-chan struct{}, readErrChan chan error) {
 	chanErr := make(chan error)
 	chanEvents := make(chan map[string]string)
-
 	go func() {
-		bufReader := bufio.NewReader(a.conn)
+		bufReader := bufio.NewReader(conn)
 		for i := 0; ; i++ {
 			var event map[string]string
 			var err error
