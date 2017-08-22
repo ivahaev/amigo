@@ -16,7 +16,7 @@ import (
 	"github.com/ivahaev/amigo"
 )
 
-var a *amigo.Amigo
+var a amigo.Amigo
 
 func setVar(channel, variable, value string) error {
 	_, err := a.Action(map[string]string{"Action": "SetVar", "Channel": channel, "Variable": variable, "Value": value})

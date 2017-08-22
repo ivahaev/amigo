@@ -19,16 +19,31 @@ var (
 	errNotConnected     = errors.New("Not connected to Asterisk")
 )
 
-type handlerFunc func(map[string]string)
+type HandlerFunc func(map[string]string)
 type eventHandlerFunc func(string)
 
 // Amigo is a main package struct
-type Amigo struct {
+type Amigo interface {
+	CapitalizeProps(c bool)
+	Action(action map[string]string) (map[string]string, error)
+	AgiAction(channel, command string) (map[string]string, error)
+	Connect()
+	Connected() bool
+	On(event string, handler func(string))
+	RegisterDefaultHandler(f HandlerFunc) error
+	RegisterHandler(event string, f HandlerFunc) error
+	SetEventChannel(c chan map[string]string)
+	UnregisterDefaultHandler(f HandlerFunc) error
+	UnregisterHandler(event string, f HandlerFunc) error
+}
+
+// AmigoImpl is an implementation of Amigo interface
+type AmigoImpl struct {
 	settings        *Settings
 	ami             *amiAdapter
 	defaultChannel  chan map[string]string
-	defaultHandler  handlerFunc
-	handlers        map[string]handlerFunc
+	defaultHandler  HandlerFunc
+	handlers        map[string]HandlerFunc
 	eventHandlers   map[string][]eventHandlerFunc
 	capitalizeProps bool
 	connectCalled   bool
@@ -59,30 +74,31 @@ type agiCommand struct {
 	dateTime time.Time
 }
 
-// New creates new Amigo struct with credentials provided and returns pointer to it
+// New creates new Amigo interface with credentials provided and returns reference to it
 // Usage: New(username string, secret string, [host string, [port string]])
-func New(settings *Settings) *Amigo {
+func New(settings *Settings) Amigo {
 	prepareSettings(settings)
 
 	var ami *amiAdapter
-	return &Amigo{
+	amigo := &AmigoImpl{
 		settings:      settings,
 		ami:           ami,
-		handlers:      map[string]handlerFunc{},
+		handlers:      map[string]HandlerFunc{},
 		eventHandlers: map[string][]eventHandlerFunc{},
 		mutex:         &sync.RWMutex{},
 		handlerMutex:  &sync.RWMutex{},
 	}
+	return Amigo(amigo)
 }
 
 // CapitalizeProps used to capitalise all prop's names when true provided.
-func (a *Amigo) CapitalizeProps(c bool) {
+func (a *AmigoImpl) CapitalizeProps(c bool) {
 	a.capitalizeProps = c
 }
 
 // Action used to execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
 // Usage amigo.Action(action map[string]string)
-func (a *Amigo) Action(action map[string]string) (map[string]string, error) {
+func (a *AmigoImpl) Action(action map[string]string) (map[string]string, error) {
 	if !a.Connected() {
 		return nil, errNotConnected
 	}
@@ -103,7 +119,7 @@ func (a *Amigo) Action(action map[string]string) (map[string]string, error) {
 
 // AgiAction used to execute Agi Actions in Asterisk. Returns full response.
 // Usage amigo.AgiAction(channel, command string)
-func (a *Amigo) AgiAction(channel, command string) (map[string]string, error) {
+func (a *AmigoImpl) AgiAction(channel, command string) (map[string]string, error) {
 	if !a.Connected() {
 		return nil, errNotConnected
 	}
@@ -141,7 +157,7 @@ func (a *Amigo) AgiAction(channel, command string) (map[string]string, error) {
 
 // Connect with Asterisk.
 // If connect fails, will try to reconnect every second.
-func (a *Amigo) Connect() {
+func (a *AmigoImpl) Connect() {
 	var connectCalled bool
 	a.mutex.RLock()
 	connectCalled = a.connectCalled
@@ -230,7 +246,7 @@ func (a *Amigo) Connect() {
 }
 
 // Connected returns true if successfully connected and logged in Asterisk and false otherwise.
-func (a *Amigo) Connected() bool {
+func (a *AmigoImpl) Connected() bool {
 	a.mutex.RLock()
 	defer a.mutex.RUnlock()
 	return a.ami != nil && a.ami.online()
@@ -238,7 +254,7 @@ func (a *Amigo) Connected() bool {
 
 // On register handler for package events. Now amigo will emit two types of events:
 // "connect" fired on connection success and "error" on any error occured.
-func (a *Amigo) On(event string, handler func(string)) {
+func (a *AmigoImpl) On(event string, handler func(string)) {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 
@@ -249,7 +265,7 @@ func (a *Amigo) On(event string, handler func(string)) {
 }
 
 // RegisterDefaultHandler registers handler function that will called on each event
-func (a *Amigo) RegisterDefaultHandler(f handlerFunc) error {
+func (a *AmigoImpl) RegisterDefaultHandler(f HandlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 
@@ -261,7 +277,7 @@ func (a *Amigo) RegisterDefaultHandler(f handlerFunc) error {
 }
 
 // RegisterHandler registers handler function for provided event name
-func (a *Amigo) RegisterHandler(event string, f handlerFunc) error {
+func (a *AmigoImpl) RegisterHandler(event string, f HandlerFunc) error {
 	event = strings.ToUpper(event)
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
@@ -273,14 +289,14 @@ func (a *Amigo) RegisterHandler(event string, f handlerFunc) error {
 }
 
 // SetEventChannel sets channel for receiving all events
-func (a *Amigo) SetEventChannel(c chan map[string]string) {
+func (a *AmigoImpl) SetEventChannel(c chan map[string]string) {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	a.defaultChannel = c
 }
 
 // UnregisterDefaultHandler removes default handler function
-func (a *Amigo) UnregisterDefaultHandler(f handlerFunc) error {
+func (a *AmigoImpl) UnregisterDefaultHandler(f HandlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	if a.defaultHandler == nil {
@@ -291,7 +307,7 @@ func (a *Amigo) UnregisterDefaultHandler(f handlerFunc) error {
 }
 
 // UnregisterHandler removes handler function for provided event name
-func (a *Amigo) UnregisterHandler(event string, f handlerFunc) error {
+func (a *AmigoImpl) UnregisterHandler(event string, f HandlerFunc) error {
 	event = strings.ToUpper(event)
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
@@ -302,7 +318,7 @@ func (a *Amigo) UnregisterHandler(event string, f handlerFunc) error {
 	return nil
 }
 
-func (a *Amigo) emitEvent(name, message string) {
+func (a *AmigoImpl) emitEvent(name, message string) {
 	a.handlerMutex.RLock()
 	defer a.handlerMutex.RUnlock()
 
