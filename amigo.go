@@ -22,6 +22,7 @@ var (
 type handlerFunc func(map[string]string)
 type eventHandlerFunc func(string)
 
+// Amigo is a main package struct
 type Amigo interface {
 	CapitalizeProps(c bool)
 	Action(action map[string]string) (map[string]string, error)
@@ -36,7 +37,7 @@ type Amigo interface {
 	UnregisterHandler(event string, f handlerFunc) error
 }
 
-// Amigo is a main package struct
+// AmigoImpl is an implementation of Amigo interface
 type AmigoImpl struct {
 	settings        *Settings
 	ami             *amiAdapter
