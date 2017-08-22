@@ -19,7 +19,7 @@ var (
 	errNotConnected     = errors.New("Not connected to Asterisk")
 )
 
-type handlerFunc func(map[string]string)
+type HandlerFunc func(map[string]string)
 type eventHandlerFunc func(string)
 
 // Amigo is a main package struct
@@ -30,11 +30,11 @@ type Amigo interface {
 	Connect()
 	Connected() bool
 	On(event string, handler func(string))
-	RegisterDefaultHandler(f handlerFunc) error
-	RegisterHandler(event string, f handlerFunc) error
+	RegisterDefaultHandler(f HandlerFunc) error
+	RegisterHandler(event string, f HandlerFunc) error
 	SetEventChannel(c chan map[string]string)
-	UnregisterDefaultHandler(f handlerFunc) error
-	UnregisterHandler(event string, f handlerFunc) error
+	UnregisterDefaultHandler(f HandlerFunc) error
+	UnregisterHandler(event string, f HandlerFunc) error
 }
 
 // AmigoImpl is an implementation of Amigo interface
@@ -42,8 +42,8 @@ type AmigoImpl struct {
 	settings        *Settings
 	ami             *amiAdapter
 	defaultChannel  chan map[string]string
-	defaultHandler  handlerFunc
-	handlers        map[string]handlerFunc
+	defaultHandler  HandlerFunc
+	handlers        map[string]HandlerFunc
 	eventHandlers   map[string][]eventHandlerFunc
 	capitalizeProps bool
 	connectCalled   bool
@@ -83,7 +83,7 @@ func New(settings *Settings) Amigo {
 	amigo := &AmigoImpl{
 		settings:      settings,
 		ami:           ami,
-		handlers:      map[string]handlerFunc{},
+		handlers:      map[string]HandlerFunc{},
 		eventHandlers: map[string][]eventHandlerFunc{},
 		mutex:         &sync.RWMutex{},
 		handlerMutex:  &sync.RWMutex{},
@@ -265,7 +265,7 @@ func (a *AmigoImpl) On(event string, handler func(string)) {
 }
 
 // RegisterDefaultHandler registers handler function that will called on each event
-func (a *AmigoImpl) RegisterDefaultHandler(f handlerFunc) error {
+func (a *AmigoImpl) RegisterDefaultHandler(f HandlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 
@@ -277,7 +277,7 @@ func (a *AmigoImpl) RegisterDefaultHandler(f handlerFunc) error {
 }
 
 // RegisterHandler registers handler function for provided event name
-func (a *AmigoImpl) RegisterHandler(event string, f handlerFunc) error {
+func (a *AmigoImpl) RegisterHandler(event string, f HandlerFunc) error {
 	event = strings.ToUpper(event)
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
@@ -296,7 +296,7 @@ func (a *AmigoImpl) SetEventChannel(c chan map[string]string) {
 }
 
 // UnregisterDefaultHandler removes default handler function
-func (a *AmigoImpl) UnregisterDefaultHandler(f handlerFunc) error {
+func (a *AmigoImpl) UnregisterDefaultHandler(f HandlerFunc) error {
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
 	if a.defaultHandler == nil {
@@ -307,7 +307,7 @@ func (a *AmigoImpl) UnregisterDefaultHandler(f handlerFunc) error {
 }
 
 // UnregisterHandler removes handler function for provided event name
-func (a *AmigoImpl) UnregisterHandler(event string, f handlerFunc) error {
+func (a *AmigoImpl) UnregisterHandler(event string, f HandlerFunc) error {
 	event = strings.ToUpper(event)
 	a.handlerMutex.Lock()
 	defer a.handlerMutex.Unlock()
