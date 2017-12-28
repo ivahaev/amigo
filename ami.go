@@ -322,7 +322,7 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 			continue
 		}
 
-		if responseFollows && key != "Privilege" {
+		if responseFollows && key != "Privilege" && key != "ActionID" {
 			if string(kv) != "--END COMMAND--" {
 				if len(m["CommandResponse"]) == 0 {
 					m["CommandResponse"] = string(kv)
@@ -363,9 +363,9 @@ func serialize(data map[string]string) []byte {
 		outBuf.WriteString(key)
 		outBuf.WriteString(": ")
 		outBuf.WriteString(data[key])
-		outBuf.WriteString("\n")
+		outBuf.WriteString("\r\n")
 	}
-	outBuf.WriteString("\n")
+	outBuf.WriteString("\r\n")
 
 	return outBuf.Bytes()
 }
