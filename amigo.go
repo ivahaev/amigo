@@ -45,13 +45,14 @@ type Amigo struct {
 // ActionTimeout = 3s
 // DialTimeout = 10s
 type Settings struct {
-	Username      string
-	Password      string
-	Host          string
-	Port          string
-	ActionTimeout time.Duration
-	DialTimeout   time.Duration
-	Keepalive     bool
+	Username          string
+	Password          string
+	Host              string
+	Port              string
+	ActionTimeout     time.Duration
+	DialTimeout       time.Duration
+	ReconnectInterval time.Duration
+	Keepalive         bool
 }
 
 type agiCommand struct {
@@ -338,5 +339,8 @@ func prepareSettings(settings *Settings) {
 	}
 	if settings.DialTimeout == 0 {
 		settings.DialTimeout = dialTimeout
+	}
+	if settings.ReconnectInterval == 0 {
+		settings.ReconnectInterval = time.Second
 	}
 }

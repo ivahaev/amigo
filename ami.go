@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	pingActionID   = "AmigoPing"
-	amigoConnIDKey = "AmigoConnID"
+	pingActionID       = "AmigoPing"
+	amigoConnIDKey     = "AmigoConnID"
+	commandResponseKey = "CommandResponse"
 )
 
 var (
@@ -57,7 +58,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 
 	a.actionsChan = make(chan map[string]string)
 	a.responseChans = make(map[string]chan map[string]string)
-	a.eventsChan = make(chan map[string]string, 1000)
+	a.eventsChan = make(chan map[string]string, 1024)
 	a.pingerChan = make(chan struct{})
 
 	go func() {
@@ -96,7 +97,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 					}
 
 					a.emitEvent("error", "AMI Reconnect failed")
-					time.Sleep(time.Second * 1)
+					time.Sleep(s.ReconnectInterval)
 				}
 
 				a.mutex.Lock()
@@ -200,10 +201,13 @@ func (a *amiAdapter) distribute(event map[string]string) {
 		return
 	}
 
+	if len(a.eventsChan) == cap(a.eventsChan) {
+		a.emitEvent("error", "events chan is full")
+	}
+
 	// TODO: Need to decide to send or not to send action responses to eventsChan
 	a.eventsChan <- event
 	if len(actionID) > 0 {
-
 		a.mutex.RLock()
 		resChan := a.responseChans[actionID]
 		a.mutex.RUnlock()
@@ -214,12 +218,12 @@ func (a *amiAdapter) distribute(event map[string]string) {
 				a.mutex.Unlock()
 				return
 			}
+
 			delete(a.responseChans, actionID)
 			a.mutex.Unlock()
 			resChan <- event
 		}
 	}
-
 }
 
 func (a *amiAdapter) exec(action map[string]string) map[string]string {
@@ -324,10 +328,10 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 
 		if responseFollows && key != "Privilege" {
 			if string(kv) != "--END COMMAND--" {
-				if len(m["CommandResponse"]) == 0 {
-					m["CommandResponse"] = string(kv)
+				if len(m[commandResponseKey]) == 0 {
+					m[commandResponseKey] = string(kv)
 				} else {
-					m["CommandResponse"] = fmt.Sprintf("%s\n%s", m["CommandResponse"], string(kv))
+					m[commandResponseKey] = fmt.Sprintf("%s\n%s", m[commandResponseKey], string(kv))
 				}
 			}
 
