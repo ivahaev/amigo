@@ -363,9 +363,9 @@ func serialize(data map[string]string) []byte {
 		outBuf.WriteString(key)
 		outBuf.WriteString(": ")
 		outBuf.WriteString(data[key])
-		outBuf.WriteString("\n")
+		outBuf.WriteString("\r\n")
 	}
-	outBuf.WriteString("\n")
+	outBuf.WriteString("\r\n")
 
 	return outBuf.Bytes()
 }
