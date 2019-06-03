@@ -79,12 +79,14 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 						n, err := conn.Read(greetings)
 						if err != nil {
 							go a.emitEvent("error", fmt.Sprintf("Asterisk connection error: %s", err.Error()))
+							time.Sleep(s.ReconnectInterval)
 							return
 						}
 
 						err = a.login(conn)
 						if err != nil {
 							go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
+							time.Sleep(s.ReconnectInterval)
 							return
 						}
 
@@ -121,6 +123,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 				a.mutex.Unlock()
 
 				go a.emitEvent("error", fmt.Sprintf("AMI TCP ERROR: %s", err.Error()))
+				time.Sleep(s.ReconnectInterval)
 			}()
 		}
 	}()
