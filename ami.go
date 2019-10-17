@@ -100,6 +100,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 
 					a.emitEvent("error", "AMI Reconnect failed")
 					time.Sleep(s.ReconnectInterval)
+					return
 				}
 
 				a.mutex.Lock()
