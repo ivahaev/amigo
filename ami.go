@@ -58,7 +58,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 
 	a.actionsChan = make(chan map[string]string)
 	a.responseChans = make(map[string]chan map[string]string)
-	a.eventsChan = make(chan map[string]string, 1024)
+	a.eventsChan = make(chan map[string]string, 4096)
 	a.pingerChan = make(chan struct{})
 
 	go func() {
@@ -79,12 +79,14 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 						n, err := conn.Read(greetings)
 						if err != nil {
 							go a.emitEvent("error", fmt.Sprintf("Asterisk connection error: %s", err.Error()))
+							time.Sleep(s.ReconnectInterval)
 							return
 						}
 
 						err = a.login(conn)
 						if err != nil {
 							go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
+							time.Sleep(s.ReconnectInterval)
 							return
 						}
 
@@ -98,6 +100,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 
 					a.emitEvent("error", "AMI Reconnect failed")
 					time.Sleep(s.ReconnectInterval)
+					return
 				}
 
 				a.mutex.Lock()
@@ -121,6 +124,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 				a.mutex.Unlock()
 
 				go a.emitEvent("error", fmt.Sprintf("AMI TCP ERROR: %s", err.Error()))
+				time.Sleep(s.ReconnectInterval)
 			}()
 		}
 	}()
