@@ -154,7 +154,7 @@ func (a *Amigo) Connect() {
 	a.mutex.Lock()
 	a.connectCalled = true
 	a.mutex.Unlock()
-	// var err error
+
 	for {
 		am, err := newAMIAdapter(a.settings, a.emitEvent)
 		if err != nil {
@@ -167,11 +167,6 @@ func (a *Amigo) Connect() {
 		}
 		time.Sleep(time.Second)
 	}
-
-	/*if err != nil {
-		go a.emitEvent("error", fmt.Sprintf("Asterisk login error: %s", err.Error()))
-		return
-	}*/
 
 	go func() {
 		for {
