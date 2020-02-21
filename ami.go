@@ -393,7 +393,7 @@ func (a *amiAdapter) reader(conn net.Conn, stop <-chan struct{}, readErrChan cha
 			}
 
 			event["#"] = strconv.Itoa(i)
-			event["Time"] = time.Now().Format(time.RFC3339Nano)
+			event["TimeReceived"] = time.Now().Format(time.RFC3339Nano)
 			chanEvents <- event
 		}
 	}()
