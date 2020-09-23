@@ -36,6 +36,7 @@ type amiAdapter struct {
 	password   string
 
 	connected     bool
+	reconnect     bool
 	actionTimeout time.Duration
 	dialTimeout   time.Duration
 
@@ -55,6 +56,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 	a.dialTimeout = s.DialTimeout
 	a.mutex = &sync.RWMutex{}
 	a.emitEvent = eventEmitter
+	a.reconnect = true
 
 	a.actionsChan = make(chan map[string]string)
 	a.responseChans = make(map[string]chan map[string]string)
@@ -63,7 +65,13 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 
 	go func() {
 		for {
+			if !a.reconnect {
+				break
+			}
 			func() {
+				if !a.reconnect {
+					return
+				}
 				a.id = nextID()
 				var err error
 				var conn net.Conn
