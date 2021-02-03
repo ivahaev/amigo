@@ -314,6 +314,8 @@ func (a *amiAdapter) openConnection() (net.Conn, error) {
 func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 	m = make(map[string]string)
 	var responseFollows bool
+	var outputExist = false
+
 	for {
 		kv, _, err := r.ReadLine()
 		if len(kv) == 0 {
@@ -364,7 +366,12 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 			responseFollows = true
 		}
 
-		m[key] = value
+		if key == "Output" && !outputExist {
+			m["RealOutput"] = value
+			outputExist = true
+		} else {
+			m[key] = value
+		}
 
 		if err != nil {
 			return m, err
