@@ -289,6 +289,11 @@ func (a *Amigo) UnregisterDefaultHandler(f handlerFunc) error {
 	return nil
 }
 
+// EventsChanLength returns the current size of eventsChan
+func (a *Amigo) EventsChanLength() int {
+	return len(a.ami.eventsChan)
+}
+
 // UnregisterHandler removes handler function for provided event name
 func (a *Amigo) UnregisterHandler(event string, f handlerFunc) error {
 	event = strings.ToUpper(event)
