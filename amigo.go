@@ -230,12 +230,17 @@ func (a *Amigo) Connect() {
 			}
 		}
 	}()
+
 }
 
 func (a *Amigo) Close() {
+	if a == nil {
+		return
+	}
 	select {
 	case <-a.ami.stopChan:
 	default:
+		a.ami.reconnect = false
 		close(a.ami.stopChan)
 	}
 }
