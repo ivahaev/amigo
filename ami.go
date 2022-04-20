@@ -45,6 +45,7 @@ type amiAdapter struct {
 	pingerChan    chan struct{}
 	mutex         *sync.RWMutex
 	emitEvent     func(string, string)
+	stopChan      chan struct{}
 }
 
 func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter, error) {
@@ -62,9 +63,15 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 	a.responseChans = make(map[string]chan map[string]string)
 	a.eventsChan = make(chan map[string]string, 4096)
 	a.pingerChan = make(chan struct{})
+	a.stopChan = make(chan struct{})
 
 	go func() {
 		for {
+			select {
+			case <-a.stopChan:
+				return
+			default:
+			}
 			if !a.reconnect {
 				break
 			}
@@ -107,7 +114,10 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 					}
 
 					a.emitEvent("error", "AMI Reconnect failed")
-					time.Sleep(s.ReconnectInterval)
+					select {
+					case <-time.After(s.ReconnectInterval):
+					case <-a.stopChan:
+					}
 					return
 				}
 
@@ -121,6 +131,10 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 				}
 
 				select {
+				case <-a.stopChan:
+					println("STOPPED")
+					close(chanStop)
+					return
 				case err = <-readErrChan:
 				case err = <-writeErrChan:
 				case err = <-pingErrChan:

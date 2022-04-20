@@ -99,8 +99,8 @@ func (a *Amigo) Action(action map[string]string) (map[string]string, error) {
 		return e, nil
 	}
 
-	if (strings.ToLower(action["Action"]) == "logoff") {
-		a.ami.reconnect = false;
+	if strings.ToLower(action["Action"]) == "logoff" {
+		a.ami.reconnect = false
 	}
 	return result, nil
 }
@@ -173,59 +173,71 @@ func (a *Amigo) Connect() {
 
 	go func() {
 		for {
-			var e = <-a.ami.eventsChan
-			a.handlerMutex.RLock()
+			select {
+			case <-a.ami.stopChan:
+				return
+			case e := <-a.ami.eventsChan:
+				a.handlerMutex.RLock()
 
-			if a.defaultChannel != nil {
-				a.defaultChannel <- e
-			}
+				if a.defaultChannel != nil {
+					a.defaultChannel <- e
+				}
 
-			var event = strings.ToUpper(e["Event"])
-			if len(event) != 0 && (a.handlers[event] != nil || a.defaultHandler != nil) {
-				if a.capitalizeProps {
-					ev := map[string]string{}
-					for k, v := range e {
-						ev[strings.ToUpper(k)] = v
-					}
+				var event = strings.ToUpper(e["Event"])
+				if len(event) != 0 && (a.handlers[event] != nil || a.defaultHandler != nil) {
+					if a.capitalizeProps {
+						ev := map[string]string{}
+						for k, v := range e {
+							ev[strings.ToUpper(k)] = v
+						}
 
-					if a.handlers[event] != nil {
-						a.handlers[event](ev)
-					}
+						if a.handlers[event] != nil {
+							a.handlers[event](ev)
+						}
 
-					if a.defaultHandler != nil {
-						a.defaultHandler(ev)
-					}
-				} else {
-					if a.defaultHandler != nil {
-						a.defaultHandler(e)
-					}
+						if a.defaultHandler != nil {
+							a.defaultHandler(ev)
+						}
+					} else {
+						if a.defaultHandler != nil {
+							a.defaultHandler(e)
+						}
 
-					if a.handlers[event] != nil {
-						a.handlers[event](e)
+						if a.handlers[event] != nil {
+							a.handlers[event](e)
+						}
 					}
 				}
-			}
 
-			if event == "ASYNCAGI" {
-				commandID, ok := e["CommandID"]
-				if !ok {
-					a.handlerMutex.RUnlock()
-					continue
+				if event == "ASYNCAGI" {
+					commandID, ok := e["CommandID"]
+					if !ok {
+						a.handlerMutex.RUnlock()
+						continue
+					}
+					agiCommandsMutex.Lock()
+					ac, ok := agiCommandsHandlers[commandID]
+					if ok {
+						delete(agiCommandsHandlers, commandID)
+						agiCommandsMutex.Unlock()
+						ac.c <- e
+					} else {
+						agiCommandsMutex.Unlock()
+					}
 				}
-				agiCommandsMutex.Lock()
-				ac, ok := agiCommandsHandlers[commandID]
-				if ok {
-					delete(agiCommandsHandlers, commandID)
-					agiCommandsMutex.Unlock()
-					ac.c <- e
-				} else {
-					agiCommandsMutex.Unlock()
-				}
-			}
 
-			a.handlerMutex.RUnlock()
+				a.handlerMutex.RUnlock()
+			}
 		}
 	}()
+}
+
+func (a *Amigo) Close() {
+	select {
+	case <-a.ami.stopChan:
+	default:
+		close(a.ami.stopChan)
+	}
 }
 
 // Connected returns true if successfully connected and logged in Asterisk and false otherwise.
