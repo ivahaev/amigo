@@ -362,7 +362,11 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 		}
 		value := string(kv[i:])
 
-		if key == "Response" && (value == "Follows" || value == "Success") {
+		if key == "Response" && value == "Follows" {
+			responseFollows = true
+		}
+
+		if key == "Message" && value == "Command output follows" {
 			responseFollows = true
 		}
 
