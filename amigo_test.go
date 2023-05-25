@@ -1,7 +1,9 @@
 package amigo
 
 import (
+	"runtime"
 	"testing"
+	"time"
 )
 
 func TestAmigo(t *testing.T) {
@@ -28,4 +30,17 @@ func TestAmigo(t *testing.T) {
 			}
 		})
 	})
+}
+
+func TestAmigoClose(t *testing.T) {
+	a := New(&Settings{Username: "username", Password: "secret"})
+	a.Connect()
+	a.Close()
+	a.Close()
+
+	time.Sleep(time.Second * 1)
+	routines := runtime.NumGoroutine()
+	if routines > 2 {
+		t.Fatalf("too many go routines, expected 2 got %d", routines)
+	}
 }
