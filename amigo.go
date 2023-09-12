@@ -16,6 +16,8 @@ var (
 	// TODO: implement function to clear old data in handlers.
 	agiCommandsHandlers = make(map[string]agiCommand)
 	agiCommandsMutex    = &sync.Mutex{}
+	amiCommandsHandlers = make(map[string]amiCommand)
+	amiCommandsMutex    = &sync.Mutex{}
 	errNotConnected     = errors.New("Not connected to Asterisk")
 )
 
@@ -48,14 +50,21 @@ type Settings struct {
 	Username          string
 	Password          string
 	Host              string
+	SIPAddress        string `json:"sip_address"`
 	Port              string
 	ActionTimeout     time.Duration
 	DialTimeout       time.Duration
 	ReconnectInterval time.Duration
 	Keepalive         bool
+	MonitorLoad       bool
 }
 
 type agiCommand struct {
+	c        chan map[string]string
+	dateTime time.Time
+}
+
+type amiCommand struct {
 	c        chan map[string]string
 	dateTime time.Time
 }
@@ -80,6 +89,18 @@ func New(settings *Settings) *Amigo {
 func (a *Amigo) CapitalizeProps(c bool) {
 	a.capitalizeProps = c
 }
+func (a *Amigo) SetAstID(astID string) {
+	a.ami.astID = astID
+}
+func (a *Amigo) GetAstID() string {
+	return a.ami.astID
+}
+func (a *Amigo) GetCallsCount() int {
+	if !a.Connected() {
+		return -1
+	}
+	return a.ami.calls
+}
 
 // Action used to execute Actions in Asterisk. Returns immediately response from asterisk. Full response will follow.
 // Usage amigo.Action(action map[string]string)
@@ -99,8 +120,41 @@ func (a *Amigo) Action(action map[string]string) (map[string]string, error) {
 		return e, nil
 	}
 
-	if strings.ToLower(action["Action"]) == "logoff" {
-		a.ami.reconnect = false
+	return result, nil
+}
+
+// AmiAction used to execute AMI Actions in Asterisk. Returns full response.
+// Usage amigo.AmiAction(action map[string]string)
+func (a *Amigo) AmiAction(action map[string]string) (map[string]string, error) {
+	if !a.Connected() {
+		return nil, errNotConnected
+	}
+	cmdID := action["CommandID"]
+	commandID := uuid.NewV4()
+	if cmdID == "" {
+		action["CommandID"] = commandID
+	} else {
+		commandID = cmdID
+	}
+
+	ac := amiCommand{make(chan map[string]string), time.Now()}
+	amiCommandsMutex.Lock()
+	amiCommandsHandlers[commandID] = ac
+	amiCommandsMutex.Unlock()
+
+	a.mutex.Lock()
+	result := a.ami.exec(action)
+	a.mutex.Unlock()
+	if result["Response"] != "Success" {
+		return result, errors.New("Fail with command")
+	}
+	result = <-ac.c
+	delete(result, "CommandID")
+	if a.capitalizeProps {
+		for k, v := range result {
+			result[strings.ToUpper(k)] = v
+			delete(result, k)
+		}
 	}
 	return result, nil
 }
@@ -173,76 +227,59 @@ func (a *Amigo) Connect() {
 
 	go func() {
 		for {
-			select {
-			case <-a.ami.stopChan:
-				return
-			case e := <-a.ami.eventsChan:
-				a.handlerMutex.RLock()
+			var e = <-a.ami.eventsChan
+			a.handlerMutex.RLock()
 
-				if a.defaultChannel != nil {
-					a.defaultChannel <- e
-				}
-
-				var event = strings.ToUpper(e["Event"])
-				if len(event) != 0 && (a.handlers[event] != nil || a.defaultHandler != nil) {
-					if a.capitalizeProps {
-						ev := map[string]string{}
-						for k, v := range e {
-							ev[strings.ToUpper(k)] = v
-						}
-
-						if a.handlers[event] != nil {
-							a.handlers[event](ev)
-						}
-
-						if a.defaultHandler != nil {
-							a.defaultHandler(ev)
-						}
-					} else {
-						if a.defaultHandler != nil {
-							a.defaultHandler(e)
-						}
-
-						if a.handlers[event] != nil {
-							a.handlers[event](e)
-						}
-					}
-				}
-
-				if event == "ASYNCAGI" {
-					commandID, ok := e["CommandID"]
-					if !ok {
-						a.handlerMutex.RUnlock()
-						continue
-					}
-					agiCommandsMutex.Lock()
-					ac, ok := agiCommandsHandlers[commandID]
-					if ok {
-						delete(agiCommandsHandlers, commandID)
-						agiCommandsMutex.Unlock()
-						ac.c <- e
-					} else {
-						agiCommandsMutex.Unlock()
-					}
-				}
-
-				a.handlerMutex.RUnlock()
+			if a.defaultChannel != nil {
+				a.defaultChannel <- e
 			}
+
+			var event = strings.ToUpper(e["Event"])
+			if len(event) != 0 && (a.handlers[event] != nil || a.defaultHandler != nil) {
+				if a.capitalizeProps {
+					ev := map[string]string{}
+					for k, v := range e {
+						ev[strings.ToUpper(k)] = v
+					}
+
+					if a.handlers[event] != nil {
+						a.handlers[event](ev)
+					}
+
+					if a.defaultHandler != nil {
+						a.defaultHandler(ev)
+					}
+				} else {
+					if a.defaultHandler != nil {
+						a.defaultHandler(e)
+					}
+
+					if a.handlers[event] != nil {
+						a.handlers[event](e)
+					}
+				}
+			}
+
+			if event == "ASYNCAGI" {
+				commandID, ok := e["CommandID"]
+				if !ok {
+					a.handlerMutex.RUnlock()
+					continue
+				}
+				agiCommandsMutex.Lock()
+				ac, ok := agiCommandsHandlers[commandID]
+				if ok {
+					delete(agiCommandsHandlers, commandID)
+					agiCommandsMutex.Unlock()
+					ac.c <- e
+				} else {
+					agiCommandsMutex.Unlock()
+				}
+			}
+
+			a.handlerMutex.RUnlock()
 		}
 	}()
-
-}
-
-func (a *Amigo) Close() {
-	if a == nil {
-		return
-	}
-	select {
-	case <-a.ami.stopChan:
-	default:
-		a.ami.reconnect = false
-		close(a.ami.stopChan)
-	}
 }
 
 // Connected returns true if successfully connected and logged in Asterisk and false otherwise.
@@ -306,11 +343,6 @@ func (a *Amigo) UnregisterDefaultHandler(f handlerFunc) error {
 	return nil
 }
 
-// EventsChanLength returns the current size of eventsChan
-func (a *Amigo) EventsChanLength() int {
-	return len(a.ami.eventsChan)
-}
-
 // UnregisterHandler removes handler function for provided event name
 func (a *Amigo) UnregisterHandler(event string, f handlerFunc) error {
 	event = strings.ToUpper(event)
@@ -363,4 +395,6 @@ func prepareSettings(settings *Settings) {
 	if settings.ReconnectInterval == 0 {
 		settings.ReconnectInterval = time.Second
 	}
+	settings.MonitorLoad = true
+	settings.Keepalive = true
 }

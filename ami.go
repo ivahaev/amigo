@@ -16,6 +16,7 @@ import (
 
 const (
 	pingActionID       = "AmigoPing"
+	loadActionID       = "AmigoLoad"
 	amigoConnIDKey     = "AmigoConnID"
 	commandResponseKey = "CommandResponse"
 )
@@ -29,23 +30,24 @@ var (
 
 type amiAdapter struct {
 	id         string
+	astID      string
 	eventsChan chan map[string]string
 
 	dialString string
 	username   string
 	password   string
 
+	calls         int
 	connected     bool
-	reconnect     bool
 	actionTimeout time.Duration
 	dialTimeout   time.Duration
 
 	actionsChan   chan map[string]string
 	responseChans map[string]chan map[string]string
 	pingerChan    chan struct{}
+	loadChan      chan map[string]string
 	mutex         *sync.RWMutex
 	emitEvent     func(string, string)
-	stopChan      chan struct{}
 }
 
 func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter, error) {
@@ -57,28 +59,15 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 	a.dialTimeout = s.DialTimeout
 	a.mutex = &sync.RWMutex{}
 	a.emitEvent = eventEmitter
-	a.reconnect = true
 
 	a.actionsChan = make(chan map[string]string)
 	a.responseChans = make(map[string]chan map[string]string)
 	a.eventsChan = make(chan map[string]string, 4096)
 	a.pingerChan = make(chan struct{})
-	a.stopChan = make(chan struct{})
-
+	a.loadChan = make(chan map[string]string)
 	go func() {
 		for {
-			select {
-			case <-a.stopChan:
-				return
-			default:
-			}
-			if !a.reconnect {
-				break
-			}
 			func() {
-				if !a.reconnect {
-					return
-				}
 				a.id = nextID()
 				var err error
 				var conn net.Conn
@@ -114,10 +103,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 					}
 
 					a.emitEvent("error", "AMI Reconnect failed")
-					select {
-					case <-time.After(s.ReconnectInterval):
-					case <-a.stopChan:
-					}
+					time.Sleep(s.ReconnectInterval)
 					return
 				}
 
@@ -129,12 +115,10 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 				if s.Keepalive {
 					go a.pinger(chanStop, pingErrChan)
 				}
-
+				if s.MonitorLoad {
+					go a.activeCalls(chanStop, pingErrChan)
+				}
 				select {
-				case <-a.stopChan:
-					println("STOPPED")
-					close(chanStop)
-					return
 				case err = <-readErrChan:
 				case err = <-writeErrChan:
 				case err = <-pingErrChan:
@@ -158,7 +142,43 @@ func nextID() string {
 	i := atomic.AddUint64(&sequence, 1)
 	return strconv.Itoa(int(i))
 }
+func (a *amiAdapter) activeCalls(stop <-chan struct{}, errChan chan error) {
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+	ping := map[string]string{"Action": "CoreStatus", "ActionID": loadActionID, amigoConnIDKey: a.id}
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
 
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+		}
+
+		if !a.online() {
+			// when stop chan didn't received before ticker
+			return
+		}
+
+		a.actionsChan <- ping
+		timer := time.NewTimer(10 * time.Second)
+		select {
+		case data := <-a.loadChan:
+			//we received some Volume info back from asterisk set it into a
+			calls := data["CoreCurrentCalls"]
+			a.calls, _ = strconv.Atoi(calls)
+			timer.Stop()
+			continue
+		case <-timer.C:
+			errChan <- errors.New("ping timeout")
+			return
+		}
+	}
+}
 func (a *amiAdapter) pinger(stop <-chan struct{}, errChan chan error) {
 	ticker := time.NewTicker(pingInterval)
 	defer ticker.Stop()
@@ -224,6 +244,10 @@ func (a *amiAdapter) distribute(event map[string]string) {
 	actionID := event["ActionID"]
 	if actionID == pingActionID {
 		a.pingerChan <- struct{}{}
+		return
+	}
+	if actionID == loadActionID {
+		a.loadChan <- event
 		return
 	}
 
@@ -328,8 +352,6 @@ func (a *amiAdapter) openConnection() (net.Conn, error) {
 func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 	m = make(map[string]string)
 	var responseFollows bool
-	var outputExist = false
-
 	for {
 		kv, _, err := r.ReadLine()
 		if len(kv) == 0 {
@@ -380,12 +402,7 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 			responseFollows = true
 		}
 
-		if key == "Output" && !outputExist {
-			m["RealOutput"] = value
-			outputExist = true
-		} else {
-			m[key] = value
-		}
+		m[key] = value
 
 		if err != nil {
 			return m, err
@@ -420,7 +437,7 @@ func (a *amiAdapter) reader(conn net.Conn, stop <-chan struct{}, readErrChan cha
 				chanErr <- err
 				return
 			}
-
+			event["AstInstance"] = a.astID
 			event["#"] = strconv.Itoa(i)
 			event["TimeReceived"] = time.Now().Format(time.RFC3339Nano)
 			chanEvents <- event
