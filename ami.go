@@ -61,7 +61,7 @@ func newAMIAdapter(s *Settings, eventEmitter func(string, string)) (*amiAdapter,
 
 	a.actionsChan = make(chan map[string]string)
 	a.responseChans = make(map[string]chan map[string]string)
-	a.eventsChan = make(chan map[string]string, 4096)
+	a.eventsChan = make(chan map[string]string, 8192)
 	a.pingerChan = make(chan struct{})
 	a.stopChan = make(chan struct{})
 
@@ -329,12 +329,28 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 	m = make(map[string]string)
 	var responseFollows bool
 	var outputExist = false
+	var completeLine bytes.Buffer // Buffer to hold incomplete lines
 
 	for {
-		kv, _, err := r.ReadLine()
-		if len(kv) == 0 {
+		tmpkv, isprefix, err := r.ReadLine()
+		if err != nil {
 			return m, err
 		}
+		if len(tmpkv) == 0 {
+			return m, err
+		}
+
+        	// Append the current line to the complete line buffer
+        	completeLine.Write(tmpkv)
+
+		if isprefix {
+			// If the line is a prefix, continue reading more
+			continue
+        	}
+
+		// We have a complete line now
+        	kv := completeLine.Bytes()
+        	completeLine.Reset() // Reset the buffer for the next line
 
 		var key string
 		i := bytes.IndexByte(kv, ':')
@@ -347,10 +363,6 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 		}
 
 		if key == "" && !responseFollows {
-			if err != nil {
-				return m, err
-			}
-
 			continue
 		}
 
@@ -362,11 +374,6 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 					m[commandResponseKey] = fmt.Sprintf("%s\n%s", m[commandResponseKey], string(kv))
 				}
 			}
-
-			if err != nil {
-				return m, err
-			}
-
 			continue
 		}
 
@@ -385,10 +392,6 @@ func readMessage(r *bufio.Reader) (m map[string]string, err error) {
 			outputExist = true
 		} else {
 			m[key] = value
-		}
-
-		if err != nil {
-			return m, err
 		}
 	}
 }
@@ -411,7 +414,7 @@ func (a *amiAdapter) reader(conn net.Conn, stop <-chan struct{}, readErrChan cha
 	chanErr := make(chan error)
 	chanEvents := make(chan map[string]string)
 	go func() {
-		bufReader := bufio.NewReader(conn)
+		bufReader := bufio.NewReaderSize(conn, 8192)
 		for i := 0; ; i++ {
 			var event map[string]string
 			var err error
